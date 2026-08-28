@@ -147,42 +147,7 @@ public class TargetGroupEvaluatorTaskTests
     }
 
     private TaskExecutionContext CreateContext(IDictionary<string, string> parameters = null)
-    {
-        var taskStoreMock = new Mock<ITaskStore>();
-        taskStoreMock
-            .Setup(x => x.UpdateExecutionInfoAsync(It.IsAny<TaskExecutionInfo>()))
-            .Returns(Task.CompletedTask);
-
-        var asyncStateMock = new Mock<IAsyncState>();
-        asyncStateMock
-            .Setup(x => x.GetAsync<TaskDescriptor>(It.IsAny<string>()))
-            .ReturnsAsync((TaskDescriptor)null);
-
-        var httpContext = new DefaultHttpContext();
-        var componentContextMock = new Mock<IComponentContext>();
-
-        var taskDescriptor = new TaskDescriptor
-        {
-            Id = 1,
-            Name = "TargetGroupEvaluator",
-            Type = typeof(TargetGroupEvaluatorTask).AssemblyQualifiedName
-        };
-
-        var executionInfo = new TaskExecutionInfo
-        {
-            Id = 1,
-            TaskDescriptorId = 1,
-            Task = taskDescriptor
-        };
-
-        return new TaskExecutionContext(
-            taskStoreMock.Object,
-            asyncStateMock.Object,
-            httpContext,
-            componentContextMock.Object,
-            executionInfo,
-            parameters);
-    }
+        => CreateContextWithTaskStore(parameters).ctx;
 
     /// <summary>
     /// Creates a TaskExecutionContext whose ITaskStore mock is returned,
@@ -295,25 +260,13 @@ public class TargetGroupEvaluatorTaskTests
         return role;
     }
 
-    private async Task SeedSystemMappingsAsync(int customerId, int roleId)
+    private async Task SeedMappingAsync(int customerId, int roleId, bool isSystemMapping)
     {
         _db.CustomerRoleMappings.Add(new CustomerRoleMapping
         {
             CustomerId = customerId,
             CustomerRoleId = roleId,
-            IsSystemMapping = true
-        });
-
-        await _db.SaveChangesAsync();
-    }
-
-    private async Task SeedManualMappingAsync(int customerId, int roleId)
-    {
-        _db.CustomerRoleMappings.Add(new CustomerRoleMapping
-        {
-            CustomerId = customerId,
-            CustomerRoleId = roleId,
-            IsSystemMapping = false
+            IsSystemMapping = isSystemMapping
         });
 
         await _db.SaveChangesAsync();
@@ -382,12 +335,12 @@ public class TargetGroupEvaluatorTaskTests
         var role1 = await SeedRoleWithRuleSetsAsync("Role1");
         var role2 = await SeedRoleWithRuleSetsAsync("Role2");
 
-        await SeedSystemMappingsAsync(customerIds[0], role1.Id);
-        await SeedSystemMappingsAsync(customerIds[1], role1.Id);
-        await SeedSystemMappingsAsync(customerIds[2], role2.Id);
+        await SeedMappingAsync(customerIds[0], role1.Id, true);
+        await SeedMappingAsync(customerIds[1], role1.Id, true);
+        await SeedMappingAsync(customerIds[2], role2.Id, true);
 
         // Also seed a manual mapping that should NOT be deleted.
-        await SeedManualMappingAsync(customerIds[0], role1.Id);
+        await SeedMappingAsync(customerIds[0], role1.Id, false);
 
         foreach (var role in new[] { role1, role2 })
         {
@@ -417,8 +370,8 @@ public class TargetGroupEvaluatorTaskTests
         var role1 = await SeedRoleWithRuleSetsAsync("Role1");
         var role2 = await SeedRoleWithRuleSetsAsync("Role2");
 
-        await SeedSystemMappingsAsync(customerIds[0], role1.Id);
-        await SeedSystemMappingsAsync(customerIds[1], role2.Id);
+        await SeedMappingAsync(customerIds[0], role1.Id, true);
+        await SeedMappingAsync(customerIds[1], role2.Id, true);
 
         foreach (var ruleSet in role1.RuleSets)
         {
@@ -450,8 +403,8 @@ public class TargetGroupEvaluatorTaskTests
         var customerIds = await SeedCustomersAsync(2);
         var role = await SeedRoleWithRuleSetsAsync("Role1");
 
-        await SeedManualMappingAsync(customerIds[0], role.Id);
-        await SeedManualMappingAsync(customerIds[1], role.Id);
+        await SeedMappingAsync(customerIds[0], role.Id, false);
+        await SeedMappingAsync(customerIds[1], role.Id, false);
 
         foreach (var ruleSet in role.RuleSets)
         {
@@ -736,7 +689,7 @@ public class TargetGroupEvaluatorTaskTests
         var customerIds = await SeedCustomersAsync(1);
         var role = await SeedRoleWithRuleSetsAsync("TestRole");
 
-        await SeedSystemMappingsAsync(customerIds[0], role.Id);
+        await SeedMappingAsync(customerIds[0], role.Id, true);
 
         // Return no customers so nothing is added, but a deletion has occurred.
         SetupRuleEvaluation(role.RuleSets.First(), Array.Empty<int>());
@@ -932,8 +885,8 @@ public class TargetGroupEvaluatorTaskTests
         var role = await SeedRoleWithRuleSetsAsync("TestRole");
 
         // Pre-seed old system mappings.
-        await SeedSystemMappingsAsync(customerIds[0], role.Id);
-        await SeedSystemMappingsAsync(customerIds[1], role.Id);
+        await SeedMappingAsync(customerIds[0], role.Id, true);
+        await SeedMappingAsync(customerIds[1], role.Id, true);
 
         // Rule evaluation now yields a different set of customers.
         SetupRuleEvaluation(role.RuleSets.First(), new[] { customerIds[2], customerIds[3], customerIds[4] });
