@@ -327,7 +327,7 @@ public class TargetGroupEvaluatorTaskTests
     /// </summary>
     private void SetupRuleEvaluation(RuleSetEntity ruleSet, int[] customerIds)
     {
-        var filterExpression = new FilterExpression();
+        var filterExpression = new FilterExpressionGroup();
 
         _ruleServiceMock
             .Setup(x => x.CreateExpressionGroupAsync(
