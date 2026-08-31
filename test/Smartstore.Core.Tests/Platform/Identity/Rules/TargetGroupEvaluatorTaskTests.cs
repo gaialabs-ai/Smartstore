@@ -366,13 +366,31 @@ public class TargetGroupEvaluatorTaskTests
     }
 
     // ----------------------------------------------------------------
-    // T6 - Null from CreateExpressionGroupAsync → no mappings, ProcessFilter never called
+    // T6 - Inactive ruleset skipped; null return from CreateExpressionGroupAsync → no mappings
+    // Tests both: the Where(x => x.IsActive) LINQ filter (inactive ruleset never reaches
+    // CreateExpressionGroupAsync) and the null-return guard (is FilterExpression pattern).
     // ----------------------------------------------------------------
     [Test]
-    public async Task T6_NullExpressionGroup_NoMappings_ProcessFilterNotCalled()
+    public async Task T6_InactiveRuleSet_SkippedAndNullReturn_NoMappings()
     {
-        await SeedRoleWithRuleSetAsync(roleId: 1, ruleSetId: 1);
+        // Seed one active role with TWO rule sets: one active (role is loaded), one inactive.
+        var role = await SeedRoleWithRuleSetAsync(roleId: 1, ruleSetId: 1); // active ruleset
 
+        var inactiveRuleSet = new RuleSetEntity
+        {
+            Id = 2,
+            IsActive = false,
+            Scope = RuleScope.Customer,
+            LogicalOperator = LogicalRuleOperator.And,
+            CreatedOnUtc = DateTime.UtcNow,
+            UpdatedOnUtc = DateTime.UtcNow
+        };
+        _db.RuleSets.Add(inactiveRuleSet);
+        await _db.SaveChangesAsync();
+        role.RuleSets.Add(inactiveRuleSet);
+        await _db.SaveChangesAsync();
+
+        // Active ruleset returns null — exercises the "is FilterExpression" null guard.
         _ruleServiceMock
             .Setup(x => x.CreateExpressionGroupAsync(It.IsAny<RuleSetEntity>(), It.IsAny<IRuleVisitor>(), It.IsAny<bool>()))
             .ReturnsAsync((IRuleExpressionGroup)null);
@@ -383,12 +401,21 @@ public class TargetGroupEvaluatorTaskTests
 
         Assert.That(await _db.CustomerRoleMappings.CountAsync(x => x.IsSystemMapping), Is.EqualTo(0));
 
+        // Active ruleset (Id=1) reaches CreateExpressionGroupAsync; inactive (Id=2) is filtered
+        // by role.RuleSets.Where(x => x.IsActive) and never reaches CreateExpressionGroupAsync.
+        _ruleServiceMock.Verify(
+            x => x.CreateExpressionGroupAsync(
+                It.Is<RuleSetEntity>(rs => rs.Id == 1), It.IsAny<IRuleVisitor>(), It.IsAny<bool>()),
+            Times.Once);
+
+        _ruleServiceMock.Verify(
+            x => x.CreateExpressionGroupAsync(
+                It.Is<RuleSetEntity>(rs => rs.Id == 2), It.IsAny<IRuleVisitor>(), It.IsAny<bool>()),
+            Times.Never);
+
         _targetGroupServiceMock.Verify(
             x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()),
+                It.IsAny<FilterExpression[]>(), It.IsAny<LogicalRuleOperator>(), It.IsAny<int>(), It.IsAny<int>()),
             Times.Never);
     }
 
