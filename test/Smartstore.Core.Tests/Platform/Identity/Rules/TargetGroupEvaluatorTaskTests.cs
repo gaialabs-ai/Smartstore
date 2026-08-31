@@ -88,7 +88,7 @@ public class TargetGroupEvaluatorTaskTests
         _targetGroupServiceMock = new Mock<ITargetGroupService>();
         _ruleProviderFactoryMock = new Mock<IRuleProviderFactory>();
         _ruleProviderFactoryMock
-            .Setup(x => x.GetProvider<ITargetGroupService>(RuleScope.Customer, null))
+            .Setup(x => x.GetProvider(RuleScope.Customer, null))
             .Returns(_targetGroupServiceMock.Object);
     }
 
