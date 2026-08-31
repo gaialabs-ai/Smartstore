@@ -42,7 +42,7 @@ public partial class TargetGroupEvaluatorTask(
                 deleteQuery = deleteQuery.Where(x => roleIds.Contains(x.CustomerRoleId));
             }
 
-            numDeleted = await deleteQuery.ExecuteDeleteAsync(cancelToken);
+            numDeleted = await ExecuteBulkDeleteAsync(deleteQuery, cancelToken);
 
             // Insert new customer role mappings.
             var rolesQuery = _db.CustomerRoles
@@ -126,4 +126,11 @@ public partial class TargetGroupEvaluatorTask(
 
         Debug.WriteLineIf(numDeleted > 0 || numAdded > 0, $"Deleted {numDeleted} and added {numAdded} customer assignments for {rolesCount} roles.");
     }
+
+    /// <summary>
+    /// Executes the bulk delete for system customer-role mappings. Override in tests to work around
+    /// database-provider limitations (e.g. EF Core InMemory does not support ExecuteDeleteAsync).
+    /// </summary>
+    protected virtual Task<int> ExecuteBulkDeleteAsync(IQueryable<CustomerRoleMapping> query, CancellationToken cancelToken)
+        => query.ExecuteDeleteAsync(cancelToken);
 }

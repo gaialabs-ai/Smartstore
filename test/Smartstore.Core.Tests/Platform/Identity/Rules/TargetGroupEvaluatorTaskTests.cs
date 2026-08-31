@@ -80,6 +80,8 @@ public class TargetGroupEvaluatorTaskTests
     {
         await _db.Database.EnsureDeletedAsync();
         await _db.Database.EnsureCreatedAsync();
+        // Clear any entities still tracked from previous tests to prevent identity conflicts.
+        _db.ChangeTracker.Clear();
 
         _cacheMock = new Mock<ICacheManager>();
         _cacheMock.Setup(x => x.RemoveByPatternAsync(It.IsAny<string>())).ReturnsAsync(0L);
@@ -94,11 +96,37 @@ public class TargetGroupEvaluatorTaskTests
 
     private TargetGroupEvaluatorTask CreateTask()
     {
-        return new TargetGroupEvaluatorTask(
+        return new TestableTask(
             _db,
             _cacheMock.Object,
             _ruleServiceMock.Object,
             _ruleProviderFactoryMock.Object);
+    }
+
+    // Subclass that overrides ExecuteBulkDeleteAsync to use the EF change tracker instead of
+    // ExecuteDeleteAsync, which is not supported by the EF Core InMemory provider.
+    private sealed class TestableTask(
+        SmartDbContext db,
+        ICacheManager cache,
+        IRuleService ruleService,
+        IRuleProviderFactory ruleProviderFactory)
+        : TargetGroupEvaluatorTask(db, cache, ruleService, ruleProviderFactory)
+    {
+        protected override async Task<int> ExecuteBulkDeleteAsync(
+            IQueryable<CustomerRoleMapping> query,
+            CancellationToken cancelToken)
+        {
+            var toDelete = await query.ToListAsync(cancelToken);
+            if (toDelete.Count == 0) return 0;
+            _db.CustomerRoleMappings.RemoveRange(toDelete);
+            // Temporarily disable SuppressCommit (set by the enclosing DbContextScope)
+            // so SaveChangesAsync actually persists the delete.
+            var prev = _db.SuppressCommit;
+            _db.SuppressCommit = false;
+            await _db.SaveChangesAsync(cancelToken);
+            _db.SuppressCommit = prev;
+            return toDelete.Count;
+        }
     }
 
     private TaskExecutionContext CreateContext(IDictionary<string, string> parameters = null)
