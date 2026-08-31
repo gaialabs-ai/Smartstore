@@ -287,14 +287,14 @@ public class TargetGroupEvaluatorTaskTests
         // CreateExpressionGroupAsync should only have been called for roleA's ruleset (Id=1).
         _ruleServiceMock.Verify(
             x => x.CreateExpressionGroupAsync(
-                It.Is<RuleSetEntity>(rs => rs.Id == roleA.RuleSets[0].Id),
+                It.Is<RuleSetEntity>(rs => rs.Id == roleA.RuleSets.First().Id),
                 It.IsAny<IRuleVisitor>(),
                 It.IsAny<bool>()),
             Times.Once);
 
         _ruleServiceMock.Verify(
             x => x.CreateExpressionGroupAsync(
-                It.Is<RuleSetEntity>(rs => rs.Id == roleB.RuleSets[0].Id),
+                It.Is<RuleSetEntity>(rs => rs.Id == roleB.RuleSets.First().Id),
                 It.IsAny<IRuleVisitor>(),
                 It.IsAny<bool>()),
             Times.Never);

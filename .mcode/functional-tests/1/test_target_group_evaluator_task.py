@@ -29,6 +29,20 @@ TEST_PROJ = os.path.join(REPO_ROOT, "test", "Smartstore.Core.Tests", "Smartstore
 PIXI_ENV_HELPER = os.environ.get("PIXI_ACTIVATE_ENV_HELPER", "")
 
 
+def _subprocess_env() -> dict:
+    """Return an env dict with PIXI_CACHE_DIR set so pixi can locate its cache."""
+    env = os.environ.copy()
+    if not env.get("PIXI_CACHE_DIR"):
+        # PIXI_CACHE_DIR is not set; derive it from the workspace root so that
+        # pixi shell-hook can resolve the cache directory regardless of whether
+        # HOME/USERPROFILE point at the real user home or a sandbox job dir.
+        pixi_manifest = env.get("PIXI_PROJECT_MANIFEST", "")
+        workspace_root = os.path.dirname(pixi_manifest) if pixi_manifest else ""
+        if workspace_root:
+            env["PIXI_CACHE_DIR"] = os.path.join(workspace_root, ".pixi", "cache")
+    return env
+
+
 def run_ps_script(ps_body: str, timeout: int = 300) -> tuple[int, str]:
     """Run an arbitrary PowerShell script body and return (returncode, combined_output)."""
     result = subprocess.run(
@@ -36,6 +50,7 @@ def run_ps_script(ps_body: str, timeout: int = 300) -> tuple[int, str]:
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=_subprocess_env(),
     )
     combined = (result.stdout or "") + (result.stderr or "")
     return result.returncode, combined
