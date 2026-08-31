@@ -483,19 +483,11 @@ public class TargetGroupEvaluatorTaskTests
             .Setup(x => x.CreateExpressionGroupAsync(It.IsAny<RuleSetEntity>(), It.IsAny<IRuleVisitor>(), It.IsAny<bool>()))
             .Returns(() =>
             {
-                // Cancel token on the first call; second role's ruleset loop will check cancellation first and return early.
+                // Cancel token on the first call and return null so ProcessFilter is never invoked.
+                // The second role's ruleset loop checks the cancelled token first and returns early.
                 cts.Cancel();
-                return Task.FromResult<IRuleExpressionGroup>(new FilterExpressionGroup(typeof(Customer)));
+                return Task.FromResult<IRuleExpressionGroup>(null);
             });
-
-        // ProcessFilter returns empty so no mappings are saved.
-        _targetGroupServiceMock
-            .Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(_db.Customers.Where(x => x.Id < 0).AsNoTracking().ToPagedList(0, 500));
 
         var task = CreateTask();
         var ctx = CreateContext();
