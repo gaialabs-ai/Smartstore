@@ -143,8 +143,14 @@ public class TargetGroupEvaluatorTaskTests
             // so SaveChangesAsync actually persists the delete.
             var prev = _db.SuppressCommit;
             _db.SuppressCommit = false;
-            await _db.SaveChangesAsync(cancelToken);
-            _db.SuppressCommit = prev;
+            try
+            {
+                await _db.SaveChangesAsync(cancelToken);
+            }
+            finally
+            {
+                _db.SuppressCommit = prev;
+            }
             return toDelete.Count;
         }
     }
@@ -237,14 +243,8 @@ public class TargetGroupEvaluatorTaskTests
 
         for (int i = 1; i <= 3; i++)
         {
-            _db.CustomerRoleMappings.Add(new CustomerRoleMapping
-            {
-                CustomerId = i,
-                CustomerRoleId = i,
-                IsSystemMapping = true
-            });
+            await SeedSystemMappingAsync(customerId: i, roleId: i);
         }
-        await _db.SaveChangesAsync();
 
         Assert.That(await _db.CustomerRoleMappings.CountAsync(x => x.IsSystemMapping), Is.EqualTo(3));
 
@@ -253,6 +253,7 @@ public class TargetGroupEvaluatorTaskTests
         await task.Run(ctx, CancellationToken.None);
 
         Assert.That(await _db.CustomerRoleMappings.CountAsync(x => x.IsSystemMapping), Is.EqualTo(0));
+        _cacheMock.Verify(x => x.RemoveByPatternAsync(AclService.ACL_SEGMENT_PATTERN), Times.Once);
     }
 
     // ----------------------------------------------------------------
@@ -265,8 +266,8 @@ public class TargetGroupEvaluatorTaskTests
         var roleB = await SeedRoleWithRuleSetAsync(roleId: 2, ruleSetId: 2);
 
         // Seed one system mapping each.
-        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = 101, CustomerRoleId = 1, IsSystemMapping = true });
-        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = 102, CustomerRoleId = 2, IsSystemMapping = true });
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = 101, CustomerRoleId = roleA.Id, IsSystemMapping = true });
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = 102, CustomerRoleId = roleB.Id, IsSystemMapping = true });
         await _db.SaveChangesAsync();
 
         // CreateExpressionGroupAsync returns null -> no new mappings for either role.
@@ -275,25 +276,25 @@ public class TargetGroupEvaluatorTaskTests
             .ReturnsAsync((IRuleExpressionGroup)null);
 
         var task = CreateTask();
-        var ctx = CreateContext(new Dictionary<string, string> { ["CustomerRoleIds"] = "1" });
+        var ctx = CreateContext(new Dictionary<string, string> { ["CustomerRoleIds"] = roleA.Id.ToString() });
         await task.Run(ctx, CancellationToken.None);
 
         // roleA's mapping should be deleted; roleB's should still exist.
         var mappings = await _db.CustomerRoleMappings.Where(x => x.IsSystemMapping).ToListAsync();
-        Assert.That(mappings.Any(m => m.CustomerRoleId == 1), Is.False, "roleA mapping should be deleted");
-        Assert.That(mappings.Any(m => m.CustomerRoleId == 2), Is.True, "roleB mapping should still exist");
+        Assert.That(mappings.Any(m => m.CustomerRoleId == roleA.Id), Is.False, "roleA mapping should be deleted");
+        Assert.That(mappings.Any(m => m.CustomerRoleId == roleB.Id), Is.True, "roleB mapping should still exist");
 
         // CreateExpressionGroupAsync should only have been called for roleA's ruleset (Id=1).
         _ruleServiceMock.Verify(
             x => x.CreateExpressionGroupAsync(
-                It.Is<RuleSetEntity>(rs => rs.Id == 1),
+                It.Is<RuleSetEntity>(rs => rs.Id == roleA.RuleSets[0].Id),
                 It.IsAny<IRuleVisitor>(),
                 It.IsAny<bool>()),
             Times.Once);
 
         _ruleServiceMock.Verify(
             x => x.CreateExpressionGroupAsync(
-                It.Is<RuleSetEntity>(rs => rs.Id == 2),
+                It.Is<RuleSetEntity>(rs => rs.Id == roleB.RuleSets[0].Id),
                 It.IsAny<IRuleVisitor>(),
                 It.IsAny<bool>()),
             Times.Never);
@@ -538,25 +539,33 @@ public class TargetGroupEvaluatorTaskTests
         var cts = new CancellationTokenSource();
 
         // Cancel after first SaveChanges (first chunk of 500 committed).
-        _db.SavedChanges += (_, _) => cts.Cancel();
+        // Store the handler in a named variable so it can be unregistered after the test.
+        EventHandler<SavedChangesEventArgs> cancelOnSave = (_, _) => cts.Cancel();
+        _db.SavedChanges += cancelOnSave;
+        try
+        {
+            var expressionGroup = new FilterExpressionGroup(typeof(Customer));
 
-        var expressionGroup = new FilterExpressionGroup(typeof(Customer));
+            _ruleServiceMock
+                .Setup(x => x.CreateExpressionGroupAsync(It.IsAny<RuleSetEntity>(), It.IsAny<IRuleVisitor>(), It.IsAny<bool>()))
+                .ReturnsAsync(expressionGroup);
 
-        _ruleServiceMock
-            .Setup(x => x.CreateExpressionGroupAsync(It.IsAny<RuleSetEntity>(), It.IsAny<IRuleVisitor>(), It.IsAny<bool>()))
-            .ReturnsAsync(expressionGroup);
+            _targetGroupServiceMock
+                .Setup(x => x.ProcessFilter(
+                    It.IsAny<FilterExpression[]>(),
+                    It.IsAny<LogicalRuleOperator>(),
+                    It.IsAny<int>(),
+                    It.IsAny<int>()))
+                .Returns(_db.Customers.AsNoTracking().ToPagedList(0, 500));
 
-        _targetGroupServiceMock
-            .Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(_db.Customers.AsNoTracking().ToPagedList(0, 500));
-
-        var task = CreateTask();
-        var ctx = CreateContext();
-        await task.Run(ctx, cts.Token);
+            var task = CreateTask();
+            var ctx = CreateContext();
+            await task.Run(ctx, cts.Token);
+        }
+        finally
+        {
+            _db.SavedChanges -= cancelOnSave;
+        }
 
         // First chunk (500) committed; second chunk (100) was cancelled before commit.
         Assert.That(await _db.CustomerRoleMappings.CountAsync(x => x.IsSystemMapping), Is.EqualTo(500));
