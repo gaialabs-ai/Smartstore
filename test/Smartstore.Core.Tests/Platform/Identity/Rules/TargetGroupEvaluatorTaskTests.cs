@@ -18,6 +18,7 @@ using Smartstore.Core.Rules.Filters;
 using Smartstore.Core.Security;
 using Smartstore.Data;
 using Smartstore.Data.Providers;
+using Smartstore.Engine;
 using Smartstore.Scheduling;
 using Smartstore.Test.Common;
 using Smartstore.Threading;
@@ -32,6 +33,7 @@ public class TargetGroupEvaluatorTaskTests
     private Mock<IRuleService> _ruleServiceMock;
     private Mock<ITargetGroupService> _targetGroupServiceMock;
     private Mock<IRuleProviderFactory> _ruleProviderFactoryMock;
+    private IEngine _previousEngine;
 
     private sealed class TargetGroupTestDbFactory : TestDbFactory
     {
@@ -46,6 +48,21 @@ public class TargetGroupEvaluatorTaskTests
     [OneTimeSetUp]
     public void OneTimeSetUp()
     {
+        // DbFactoryOptionsExtension..ctor accesses EngineContext.Current.Application.Services
+        // to optionally resolve SmartConfiguration. When tests run in isolation (not as part of
+        // the full suite where ServiceTestBase already sets the engine), EngineContext.Current is
+        // null. Install a minimal engine so the extension resolves to null gracefully.
+        _previousEngine = EngineContext.Current;
+        if (_previousEngine == null)
+        {
+            var container = new ContainerBuilder().Build();
+            var appCtxMock = new Mock<IApplicationContext>();
+            appCtxMock.Setup(x => x.Services).Returns(container);
+            var engineMock = new Mock<IEngine>();
+            engineMock.Setup(x => x.Application).Returns(appCtxMock.Object);
+            EngineContext.Replace(engineMock.Object);
+        }
+
         var dataSettings = new DataSettings
         {
             AppVersion = SmartstoreVersion.Version,
@@ -73,6 +90,9 @@ public class TargetGroupEvaluatorTaskTests
     {
         _db.Dispose();
         DataSettings.Reload();
+        // Restore the engine context to whatever it was before (or null) so subsequent
+        // test fixtures that rely on a real engine (e.g. ServiceTestBase) are not affected.
+        EngineContext.Replace(_previousEngine);
     }
 
     [SetUp]
