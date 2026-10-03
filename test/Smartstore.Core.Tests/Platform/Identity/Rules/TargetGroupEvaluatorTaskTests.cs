@@ -151,6 +151,18 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             parameters);
     }
 
+    private static RuleSetEntity CreateRuleSet(string name, bool isActive = true)
+    {
+        return new RuleSetEntity
+        {
+            Name = name,
+            IsActive = isActive,
+            Scope = RuleScope.Customer,
+            CreatedOnUtc = DateTime.UtcNow,
+            UpdatedOnUtc = DateTime.UtcNow
+        };
+    }
+
     #region Task Execution Tests
 
     [Test]
@@ -233,22 +245,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_WhenNoParameter_ProcessesAllActiveRolesWithActiveRuleSets()
     {
         // Seed 2 active roles with active rule sets and 1 inactive role.
-        var ruleSet1 = new RuleSetEntity
-        {
-            Name = "RS1",
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-        var ruleSet2 = new RuleSetEntity
-        {
-            Name = "RS2",
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
+        var ruleSet1 = CreateRuleSet("RS1");
+        var ruleSet2 = CreateRuleSet("RS2");
 
         var activeRole1 = new CustomerRole { Active = true, Name = "Active1", SystemName = "AR1" };
         activeRole1.RuleSets.Add(ruleSet1);
@@ -322,22 +320,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_RespectsCancellationToken()
     {
         // Seed an active role with 2 active rule sets so the inner loop iterates twice.
-        var ruleSet1 = new RuleSetEntity
-        {
-            Name = "RS1",
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-        var ruleSet2 = new RuleSetEntity
-        {
-            Name = "RS2",
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
+        var ruleSet1 = CreateRuleSet("RS1");
+        var ruleSet2 = CreateRuleSet("RS2");
         var role = new CustomerRole { Active = true, Name = "TestRole", SystemName = "TR" };
         role.RuleSets.Add(ruleSet1);
         role.RuleSets.Add(ruleSet2);
@@ -441,14 +425,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_WhenRolesHaveNoActiveRuleSets_SkipsThem()
     {
         // Seed an active role with only an inactive rule set.
-        var inactiveRuleSet = new RuleSetEntity
-        {
-            Name = "InactiveRS",
-            IsActive = false,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
+        var inactiveRuleSet = CreateRuleSet("InactiveRS", isActive: false);
         var role = new CustomerRole { Active = true, Name = "TestRole", SystemName = "TR" };
         role.RuleSets.Add(inactiveRuleSet);
         DbContext.CustomerRoles.Add(role);
@@ -477,14 +454,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_WhenRuleSetProducesNoMatchingCustomers_NoInserts()
     {
         // Seed an active role with an active rule set.
-        var ruleSet = new RuleSetEntity
-        {
-            Name = "RS",
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
+        var ruleSet = CreateRuleSet("RS");
         var role = new CustomerRole { Active = true, Name = "TestRole", SystemName = "TR" };
         role.RuleSets.Add(ruleSet);
         DbContext.CustomerRoles.Add(role);
