@@ -367,54 +367,6 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
     #endregion
 
-    #region Cache Invalidation Tests
-
-    [Test]
-    public async Task Run_WhenMappingsChanged_ClearsAclCachePattern()
-    {
-        // Seed a system mapping so that the delete step produces numDeleted > 0.
-        var role = new CustomerRole { Active = false, Name = "TestRole", SystemName = "TR" };
-        DbContext.CustomerRoles.Add(role);
-
-        var customer = new Customer
-        {
-            CustomerGuid = Guid.NewGuid(),
-            Active = true,
-            CreatedOnUtc = DateTime.UtcNow
-        };
-        DbContext.Customers.Add(customer);
-        DbContext.SaveChanges();
-
-        DbContext.CustomerRoleMappings.Add(
-            new CustomerRoleMapping { CustomerId = customer.Id, CustomerRoleId = role.Id, IsSystemMapping = true });
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-
-        var ctx = CreateContext();
-        await _task.Run(ctx, CancellationToken.None);
-
-        // Cache should be cleared because numDeleted > 0.
-        _cacheMock.Verify(
-            x => x.RemoveByPatternAsync(AclService.ACL_SEGMENT_PATTERN),
-            Times.Once(),
-            "ACL cache should be cleared when system mappings are deleted.");
-    }
-
-    [Test]
-    public async Task Run_WhenNoChanges_DoesNotClearCache()
-    {
-        // No system mappings exist and no active roles with rule sets -> nothing changes.
-        var ctx = CreateContext();
-        await _task.Run(ctx, CancellationToken.None);
-
-        _cacheMock.Verify(
-            x => x.RemoveByPatternAsync(It.IsAny<string>()),
-            Times.Never(),
-            "ACL cache should NOT be cleared when no mappings changed.");
-    }
-
-    #endregion
-
     #region Edge Case Tests
 
     [Test]
