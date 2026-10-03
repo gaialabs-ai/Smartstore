@@ -22,7 +22,7 @@ public class TargetGroupServiceDescriptorTests
     private TargetGroupService _targetGroupService;
     private RuleDescriptorCollection _descriptors;
 
-    // All 35 legacy descriptor names in expected order.
+    // All 39 legacy descriptor names in expected order.
     private static readonly string[] LegacyDescriptorNames =
     [
         "Active",
@@ -179,8 +179,8 @@ public class TargetGroupServiceDescriptorTests
     [Test]
     public void LoadDescriptors_TotalCountReflectsLegacyPlusModernAdditions()
     {
-        // 35 legacy descriptors + 1 modern-only (LastDeviceFamily) = 36 total.
-        _descriptors.Count.ShouldEqual(36);
+        // 39 legacy descriptors + 1 modern-only (LastDeviceFamily) = 40 total.
+        _descriptors.Count.ShouldEqual(40);
     }
 
     [Test]
