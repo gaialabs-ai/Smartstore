@@ -68,7 +68,8 @@ public partial class TargetGroupEvaluatorTask(
                         var filterResult = _targetGroupService.ProcessFilter(expression, 0, 500);
                         var resultPager = new FastPager<Customer>(filterResult.SourceQuery, 500);
 
-                        while ((await resultPager.ReadNextPageAsync(x => x.Id, x => x, cancelToken)).Out(out var customerIds))
+                        while (!cancelToken.IsCancellationRequested &&
+                               (await resultPager.ReadNextPageAsync(x => x.Id, x => x, cancelToken)).Out(out var customerIds))
                         {
                             ruleSetCustomerIds.AddRange(customerIds);
                         }
