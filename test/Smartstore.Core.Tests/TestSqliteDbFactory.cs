@@ -3,6 +3,7 @@ using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Smartstore.Core.Data;
 using Smartstore.Data;
 using Smartstore.Data.Providers;
 using Smartstore.Test.Common;
