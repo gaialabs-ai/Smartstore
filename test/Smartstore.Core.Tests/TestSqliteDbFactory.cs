@@ -30,13 +30,18 @@ public class TestSqliteDbFactory : DbFactory
 
     public override DbConnectionStringBuilder CreateConnectionStringBuilder(
         string server, string database, string userName, string password)
-        => throw new NotImplementedException();
+        => new SqliteConnectionStringBuilder("DataSource=:memory:");
 
     public override DataProvider CreateDataProvider(DatabaseFacade database)
         => new TestDataProvider(database);
 
     public override TContext CreateDbContext<TContext>(string connectionString, int? commandTimeout = null)
-        => throw new NotImplementedException();
+    {
+        var builder = new DbContextOptionsBuilder<SmartDbContext>()
+            .UseSqlite(_connection);
+
+        return (TContext)(object)new SmartDbContext((DbContextOptions<SmartDbContext>)builder.Options);
+    }
 
     public override DbContextOptionsBuilder ConfigureDbContext(DbContextOptionsBuilder builder, string connectionString)
     {
