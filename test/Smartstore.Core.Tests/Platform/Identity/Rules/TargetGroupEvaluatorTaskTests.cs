@@ -163,6 +163,30 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         };
     }
 
+    private FilterExpressionGroup SetupRuleEvaluationMocks(IQueryable<Customer> customerQuery = null)
+    {
+        var expression = new FilterExpressionGroup(typeof(Customer))
+        {
+            LogicalOperator = LogicalRuleOperator.And
+        };
+
+        _ruleServiceMock.Setup(x => x.CreateExpressionGroupAsync(
+                It.IsAny<RuleSetEntity>(),
+                It.IsAny<IRuleVisitor>(),
+                It.IsAny<bool>()))
+            .ReturnsAsync(expression);
+
+        var query = customerQuery ?? DbContext.Customers.Where(x => false);
+        _targetGroupServiceMock.Setup(x => x.ProcessFilter(
+                It.IsAny<FilterExpression[]>(),
+                It.IsAny<LogicalRuleOperator>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()))
+            .Returns(query.ToPagedList(0, 500));
+
+        return expression;
+    }
+
     #region Task Execution Tests
 
     [Test]
@@ -274,27 +298,10 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         DbContext.SaveChanges();
         DbContext.ChangeTracker.Clear();
 
-        // Mock rule service to return a filter expression group.
-        var expression = new FilterExpressionGroup(typeof(Customer))
-        {
-            LogicalOperator = LogicalRuleOperator.And
-        };
-
-        _ruleServiceMock.Setup(x => x.CreateExpressionGroupAsync(
-                It.IsAny<RuleSetEntity>(),
-                It.IsAny<IRuleVisitor>(),
-                It.IsAny<bool>()))
-            .ReturnsAsync(expression);
-
-        // Mock ProcessFilter to return both customers from the database.
+        // Mock rule evaluation to return both customers.
         var targetIds = new[] { customer1.Id, customer2.Id };
         var customerQuery = DbContext.Customers.Where(x => targetIds.Contains(x.Id));
-        _targetGroupServiceMock.Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(customerQuery.ToPagedList(0, 500));
+        SetupRuleEvaluationMocks(customerQuery);
 
         var ctx = CreateContext();
         await _task.Run(ctx, CancellationToken.None);
@@ -331,13 +338,11 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
         using var cts = new CancellationTokenSource();
         var callCount = 0;
-        var expression = new FilterExpressionGroup(typeof(Customer))
-        {
-            LogicalOperator = LogicalRuleOperator.And
-        };
 
-        // Cancel the token during the first CreateExpressionGroupAsync call.
-        // The second rule set iteration will detect cancellation and return early.
+        // Set up default mocks (empty ProcessFilter results).
+        var expression = SetupRuleEvaluationMocks();
+
+        // Override CreateExpressionGroupAsync to cancel the token on the first call.
         _ruleServiceMock.Setup(x => x.CreateExpressionGroupAsync(
                 It.IsAny<RuleSetEntity>(),
                 It.IsAny<IRuleVisitor>(),
@@ -351,15 +356,6 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
                 }
                 return Task.FromResult<IRuleExpressionGroup>(expression);
             });
-
-        // Return empty results so no customer IDs are collected.
-        var emptyQuery = DbContext.Customers.Where(x => false);
-        _targetGroupServiceMock.Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(emptyQuery.ToPagedList(0, 500));
 
         var ctx = CreateContext();
         await _task.Run(ctx, cts.Token);
@@ -461,25 +457,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         DbContext.SaveChanges();
         DbContext.ChangeTracker.Clear();
 
-        // Mock rule service to return a valid expression.
-        var expression = new FilterExpressionGroup(typeof(Customer))
-        {
-            LogicalOperator = LogicalRuleOperator.And
-        };
-        _ruleServiceMock.Setup(x => x.CreateExpressionGroupAsync(
-                It.IsAny<RuleSetEntity>(),
-                It.IsAny<IRuleVisitor>(),
-                It.IsAny<bool>()))
-            .ReturnsAsync(expression);
-
-        // Mock ProcessFilter to return an empty result (no matching customers).
-        var emptyQuery = DbContext.Customers.Where(x => false);
-        _targetGroupServiceMock.Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(emptyQuery.ToPagedList(0, 500));
+        // Mock rule evaluation with empty results (no matching customers).
+        SetupRuleEvaluationMocks();
 
         var ctx = CreateContext();
         await _task.Run(ctx, CancellationToken.None);
