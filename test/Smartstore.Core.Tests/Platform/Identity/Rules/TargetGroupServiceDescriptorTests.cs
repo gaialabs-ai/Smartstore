@@ -235,6 +235,13 @@ public class TargetGroupServiceDescriptorTests
         }
     }
 
+    [Test]
+    public void LoadDescriptors_RuleSetDescriptorHasCorrectOperators()
+    {
+        AssertDescriptorOperators("RuleSet",
+            RuleOperator.IsEqualTo, RuleOperator.IsNotEqualTo);
+    }
+
     private void AssertDescriptorRuleType(string descriptorName, RuleType expectedRuleType)
     {
         var descriptor = _descriptors.FindDescriptor(descriptorName);
@@ -242,5 +249,13 @@ public class TargetGroupServiceDescriptorTests
         Assert.That(descriptor.RuleType, Is.EqualTo(expectedRuleType),
             $"Descriptor '{descriptorName}' has RuleType '{descriptor.RuleType?.Name}' " +
             $"but expected '{expectedRuleType.Name}'.");
+    }
+
+    private void AssertDescriptorOperators(string descriptorName, params RuleOperator[] expectedOperators)
+    {
+        var descriptor = _descriptors.FindDescriptor(descriptorName);
+        Assert.That(descriptor, Is.Not.Null, $"Descriptor '{descriptorName}' not found.");
+        Assert.That(descriptor.Operators, Is.EqualTo(expectedOperators),
+            $"Descriptor '{descriptorName}' operators do not match the expected values.");
     }
 }
