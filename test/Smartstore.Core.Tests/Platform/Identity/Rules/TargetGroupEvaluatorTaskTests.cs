@@ -5,15 +5,19 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autofac;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
 using Smartstore.Caching;
+using Smartstore.Core.Data;
 using Smartstore.Core.Identity;
 using Smartstore.Core.Identity.Rules;
 using Smartstore.Core.Rules;
 using Smartstore.Core.Rules.Filters;
 using Smartstore.Core.Security;
+using Smartstore.Data;
+using Smartstore.Data.Providers;
 using Smartstore.Scheduling;
 using Smartstore.Test.Common;
 using Smartstore.Threading;
@@ -23,6 +27,13 @@ namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 [TestFixture]
 public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 {
+    private SqliteConnection _sqliteConnection;
+    private SmartDbContext _sqliteDbContext;
+
+    // Shadow the base class DbContext to use SQLite instead of the InMemory provider.
+    // SQLite supports ExecuteDeleteAsync (a relational-only operation) that the task calls.
+    protected new SmartDbContext DbContext => _sqliteDbContext;
+
     private Mock<ICacheManager> _cacheMock;
     private Mock<IRuleService> _ruleServiceMock;
     private Mock<IRuleProviderFactory> _ruleProviderFactoryMock;
@@ -33,6 +44,22 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     [OneTimeSetUp]
     public void Setup()
     {
+        // Create a SQLite in-memory connection and keep it open for the fixture lifetime.
+        // SQLite supports ExecuteDeleteAsync (unlike the EF Core InMemory provider).
+        _sqliteConnection = new SqliteConnection("DataSource=:memory:");
+        _sqliteConnection.Open();
+
+        var sqliteFactory = new TestSqliteDbFactory(_sqliteConnection);
+
+        var builder = new DbContextOptionsBuilder<SmartDbContext>()
+            .UseDbFactory(sqliteFactory, "DataSource=:memory:", factoryBuilder =>
+            {
+                factoryBuilder.AddModelAssemblies(new[] { typeof(SmartDbContext).Assembly });
+            });
+
+        _sqliteDbContext = new SmartDbContext((DbContextOptions<SmartDbContext>)builder.Options);
+        _sqliteDbContext.Database.EnsureCreated();
+
         _cacheMock = new Mock<ICacheManager>();
         _ruleServiceMock = new Mock<IRuleService>();
         _targetGroupServiceMock = new Mock<ITargetGroupService>();
@@ -50,6 +77,14 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             _cacheMock.Object,
             _ruleServiceMock.Object,
             _ruleProviderFactoryMock.Object);
+    }
+
+    [OneTimeTearDown]
+    public void SqliteTearDown()
+    {
+        _sqliteDbContext?.Dispose();
+        _sqliteConnection?.Close();
+        _sqliteConnection?.Dispose();
     }
 
     [SetUp]
@@ -105,7 +140,14 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             Mock.Of<IAsyncState>(),
             Mock.Of<HttpContext>(),
             Mock.Of<IComponentContext>(),
-            new TaskExecutionInfo(),
+            new TaskExecutionInfo
+            {
+                Task = new TaskDescriptor
+                {
+                    Name = "TargetGroupEvaluator",
+                    Type = "TargetGroupEvaluatorTask"
+                }
+            },
             parameters);
     }
 
