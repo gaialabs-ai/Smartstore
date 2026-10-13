@@ -333,7 +333,7 @@ public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
     }
 
     // ------------------------------------------------------------------
-    // 3. CustomerRoleIds parameter scopes the delete phase only
+    // 3. CustomerRoleIds parameter scopes both delete and insert phases
     // ------------------------------------------------------------------
 
     [Test]
@@ -364,8 +364,7 @@ public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
         SetupProcessFilter(query);
 
         // Run with CustomerRoleIds = role A's ID only.
-        // The delete phase should only remove role A's system mappings (none exist).
-        // The insert phase processes ALL active roles regardless of the parameter.
+        // Both the delete and insert phases are scoped to role A only.
         var parameters = new Dictionary<string, string>
         {
             ["CustomerRoleIds"] = roleA.Id.ToString()
@@ -380,12 +379,11 @@ public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
             .CountAsync(x => x.IsSystemMapping && x.CustomerRoleId == 703);
         roleACount.ShouldEqual(customerCount);
 
-        // Role B should have 30 mappings: 15 pre-seeded (not deleted because
-        // CustomerRoleIds only targeted role A) + 15 newly inserted.
-        // This documents the production behavior: the CustomerRoleIds parameter
-        // scopes only the delete phase, not the insert phase.
+        // Role B should retain only its 15 pre-seeded mappings: the delete phase
+        // did not target it (CustomerRoleIds = role A only), and the insert phase
+        // is now also scoped to the specified roles, matching legacy behavior.
         var roleBCount = await DbContext.CustomerRoleMappings
             .CountAsync(x => x.IsSystemMapping && x.CustomerRoleId == 704);
-        roleBCount.ShouldEqual(customerCount * 2);
+        roleBCount.ShouldEqual(customerCount);
     }
 }
