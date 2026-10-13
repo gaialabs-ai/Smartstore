@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Autofac;
 using Microsoft.AspNetCore.Http;
@@ -15,9 +14,6 @@ using Smartstore.Core.Identity;
 using Smartstore.Core.Identity.Rules;
 using Smartstore.Core.Rules;
 using Smartstore.Core.Rules.Filters;
-using Smartstore.Core.Security;
-using Smartstore.Data;
-using Smartstore.Data.Hooks;
 using Smartstore.Scheduling;
 using Smartstore.Test.Common;
 using Smartstore.Threading;

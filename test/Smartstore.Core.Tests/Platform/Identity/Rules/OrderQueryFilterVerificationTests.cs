@@ -1,4 +1,3 @@
-using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Smartstore.Core.Checkout.Orders;

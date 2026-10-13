@@ -101,39 +101,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     }
 
     private TaskExecutionContext CreateTaskExecutionContext(IDictionary<string, string> parameters = null)
-    {
-        var executionInfo = new TaskExecutionInfo
-        {
-            Id = 1,
-            TaskDescriptorId = 1,
-            IsRunning = true,
-            StartedOnUtc = DateTime.UtcNow,
-            Task = new TaskDescriptor
-            {
-                Id = 1,
-                Name = "TargetGroupEvaluatorTask",
-                Type = typeof(TargetGroupEvaluatorTask).AssemblyQualifiedName,
-                Enabled = true,
-                CronExpression = "0 15 2 * * *"
-            }
-        };
-
-        var ctxMock = new Mock<TaskExecutionContext>(
-            _taskStoreMock.Object,
-            _asyncStateMock.Object,
-            new DefaultHttpContext(),
-            _componentContextMock.Object,
-            executionInfo,
-            parameters ?? new Dictionary<string, string>())
-        { CallBase = true };
-
-        // Override the virtual SetProgressAsync to avoid calling real TaskStore/AsyncState.
-        ctxMock
-            .Setup(x => x.SetProgressAsync(It.IsAny<int?>(), It.IsAny<string>()))
-            .Returns(Task.CompletedTask);
-
-        return ctxMock.Object;
-    }
+        => CreateMockableTaskExecutionContext(parameters).Object;
 
     private Customer SeedCustomer(int id)
     {
@@ -226,12 +194,12 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_WithNoRoleIds_DeletesAllSystemMappings()
     {
         // Arrange: Seed customers, roles, and system mappings for multiple roles.
-        var customer1 = SeedCustomer(101);
-        var customer2 = SeedCustomer(102);
+        SeedCustomer(101);
+        SeedCustomer(102);
         DbContext.SaveChanges();
 
-        var role1 = SeedCustomerRoleWithRuleSet(201, "Role1", 301);
-        var role2 = SeedCustomerRoleWithRuleSet(202, "Role2", 302);
+        SeedCustomerRoleWithRuleSet(201, "Role1", 301);
+        SeedCustomerRoleWithRuleSet(202, "Role2", 302);
 
         SeedSystemMapping(101, 201, isSystemMapping: true);
         SeedSystemMapping(102, 202, isSystemMapping: true);
@@ -276,12 +244,12 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_WithSpecificRoleIds_DeletesOnlyScopedMappings()
     {
         // Arrange: Seed customers, roles, and system mappings.
-        var customer1 = SeedCustomer(111);
-        var customer2 = SeedCustomer(112);
+        SeedCustomer(111);
+        SeedCustomer(112);
         DbContext.SaveChanges();
 
-        var role1 = SeedCustomerRoleWithRuleSet(211, "ScopedRole", 311);
-        var role2 = SeedCustomerRoleWithRuleSet(212, "UntouchedRole", 312);
+        SeedCustomerRoleWithRuleSet(211, "ScopedRole", 311);
+        SeedCustomerRoleWithRuleSet(212, "UntouchedRole", 312);
 
         SeedSystemMapping(111, 211, isSystemMapping: true);
         SeedSystemMapping(112, 212, isSystemMapping: true);
@@ -328,11 +296,11 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_CreatesSystemMappings()
     {
         // Arrange: Seed customers that will be returned by rule evaluation.
-        var customer1 = SeedCustomer(121);
-        var customer2 = SeedCustomer(122);
+        SeedCustomer(121);
+        SeedCustomer(122);
         DbContext.SaveChanges();
 
-        var role = SeedCustomerRoleWithRuleSet(221, "TestRole", 321);
+        SeedCustomerRoleWithRuleSet(221, "TestRole", 321);
         var ctx = CreateTaskExecutionContext();
 
         // Set up rules so that ProcessFilter returns a queryable backed by our seeded customers.
@@ -368,8 +336,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(131);
         DbContext.SaveChanges();
 
-        var role1 = SeedCustomerRoleWithRuleSet(231, "ProgressRole1", 331);
-        var role2 = SeedCustomerRoleWithRuleSet(232, "ProgressRole2", 332);
+        SeedCustomerRoleWithRuleSet(231, "ProgressRole1", 331);
+        SeedCustomerRoleWithRuleSet(232, "ProgressRole2", 332);
 
         var ctxMock = CreateMockableTaskExecutionContext();
 
@@ -525,7 +493,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         }
         DbContext.SaveChanges();
 
-        var role = SeedCustomerRoleWithRuleSet(251, "InsertCancelRole", 351);
+        SeedCustomerRoleWithRuleSet(251, "InsertCancelRole", 351);
         var ruleSet = await DbContext.RuleSets.FindAsync(351);
 
         SetupRuleServiceToReturnFilterExpression(ruleSet);
@@ -568,10 +536,10 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     public async Task Run_InvalidatesCacheWhenChanges()
     {
         // Arrange: Seed data so that the task produces changes.
-        var customer = SeedCustomer(171);
+        SeedCustomer(171);
         DbContext.SaveChanges();
 
-        var role = SeedCustomerRoleWithRuleSet(271, "CacheRole", 371);
+        SeedCustomerRoleWithRuleSet(271, "CacheRole", 371);
 
         // Seed an existing system mapping to be deleted (numDeleted > 0).
         SeedSystemMapping(171, 271, isSystemMapping: true);
@@ -609,7 +577,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(181);
         DbContext.SaveChanges();
 
-        var role = SeedCustomerRoleWithRuleSet(281, "NoCacheRole", 381);
+        SeedCustomerRoleWithRuleSet(281, "NoCacheRole", 381);
 
         var ruleSet = await DbContext.RuleSets.FindAsync(381);
         SetupRuleServiceToReturnFilterExpression(ruleSet);

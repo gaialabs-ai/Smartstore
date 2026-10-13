@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Autofac;
 using Microsoft.AspNetCore.Http;
@@ -16,8 +15,6 @@ using Smartstore.Core.Identity.Rules;
 using Smartstore.Core.Rules;
 using Smartstore.Core.Rules.Filters;
 using Smartstore.Core.Security;
-using Smartstore.Data;
-using Smartstore.Data.Hooks;
 using Smartstore.Scheduling;
 using Smartstore.Test.Common;
 using Smartstore.Threading;
@@ -236,8 +233,8 @@ public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
         const int customerCount = 50;
 
         SeedCustomers(startId, customerCount);
-        var roleA = SeedRoleWithRuleSet(700, "IntegrationRoleA", 800);
-        var roleB = SeedRoleWithRuleSet(701, "IntegrationRoleB", 801);
+        SeedRoleWithRuleSet(700, "IntegrationRoleA", 800);
+        SeedRoleWithRuleSet(701, "IntegrationRoleB", 801);
 
         var query = DbContext.Customers
             .Where(c => c.Id >= startId && c.Id < startId + customerCount);
@@ -346,7 +343,7 @@ public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
 
         SeedCustomers(startId, customerCount);
         var roleA = SeedRoleWithRuleSet(703, "ParamRoleA", 803);
-        var roleB = SeedRoleWithRuleSet(704, "ParamRoleB", 804);
+        SeedRoleWithRuleSet(704, "ParamRoleB", 804);
 
         // Pre-seed system mappings for role B (simulating a previous task run).
         for (int i = 0; i < customerCount; i++)
