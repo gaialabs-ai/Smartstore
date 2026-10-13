@@ -21,6 +21,18 @@ public partial class TargetGroupEvaluatorTask(
     protected readonly IRuleService _ruleService = ruleService;
     protected readonly ITargetGroupService _targetGroupService = ruleProviderFactory.GetProvider<ITargetGroupService>(RuleScope.Customer);
 
+    /// <summary>
+    /// Evaluates all active rule sets attached to customer roles, deletes existing
+    /// system-generated customer-role mappings, and batch-inserts new mappings for
+    /// matching customers.
+    /// </summary>
+    /// <param name="ctx">The task execution context providing progress reporting and parameters.</param>
+    /// <param name="cancelToken">Token to observe for cancellation at rule evaluation and insertion stages.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <remarks>
+    /// Runs daily at 02:15 by default. Can also be triggered on-demand from the admin UI
+    /// for specific customer roles by passing a <c>CustomerRoleIds</c> parameter.
+    /// </remarks>
     public async Task Run(TaskExecutionContext ctx, CancellationToken cancelToken = default)
     {
         var count = 0;
@@ -31,23 +43,30 @@ public partial class TargetGroupEvaluatorTask(
         using (var scope = new DbContextScope(_db, autoDetectChanges: false, minHookImportance: HookImportance.Important, deferCommit: true))
         {
             // Delete existing system mappings.
+            int[] filteredRoleIds = null;
             var deleteQuery = _db.CustomerRoleMappings.Where(x => x.IsSystemMapping);
             if (ctx.Parameters.ContainsKey("CustomerRoleIds"))
             {
-                var roleIds = ctx.Parameters["CustomerRoleIds"].ToIntArray();
-                deleteQuery = deleteQuery.Where(x => roleIds.Contains(x.CustomerRoleId));
+                filteredRoleIds = ctx.Parameters["CustomerRoleIds"].ToIntArray();
+                deleteQuery = deleteQuery.Where(x => filteredRoleIds.Contains(x.CustomerRoleId));
             }
 
-            numDeleted = await deleteQuery.ExecuteDeleteAsync(cancelToken);
+            numDeleted = await DeleteSystemMappingsAsync(deleteQuery, scope, cancelToken);
 
             // Insert new customer role mappings.
-            var roles = await _db.CustomerRoles
+            var rolesQuery = _db.CustomerRoles
                 .Include(x => x.RuleSets)
                 .ThenInclude(x => x.Rules)
                 .AsNoTracking()
                 .AsSplitQuery()
-                .Where(x => x.Active && x.RuleSets.Any(y => y.IsActive))
-                .ToListAsync(cancelToken);
+                .Where(x => x.Active && x.RuleSets.Any(y => y.IsActive));
+
+            if (filteredRoleIds != null)
+            {
+                rolesQuery = rolesQuery.Where(x => filteredRoleIds.Contains(x.Id));
+            }
+
+            var roles = await rolesQuery.ToListAsync(cancelToken);
             rolesCount = roles.Count;
 
             foreach (var role in roles)
@@ -96,6 +115,7 @@ public partial class TargetGroupEvaluatorTask(
                         }
 
                         await scope.CommitAsync(cancelToken);
+                        await OnAfterChunkCommittedAsync(cancelToken);
                     }
 
                     try
@@ -116,4 +136,18 @@ public partial class TargetGroupEvaluatorTask(
 
         Debug.WriteLineIf(numDeleted > 0 || numAdded > 0, $"Deleted {numDeleted} and added {numAdded} customer assignments for {rolesCount} roles.");
     }
+
+    protected virtual async Task<int> DeleteSystemMappingsAsync(
+        IQueryable<CustomerRoleMapping> deleteQuery,
+        DbContextScope scope,
+        CancellationToken cancelToken)
+    {
+        return await deleteQuery.ExecuteDeleteAsync(cancelToken);
+    }
+
+    protected virtual Task OnAfterChunkCommittedAsync(CancellationToken cancelToken)
+    {
+        return Task.CompletedTask;
+    }
+
 }
