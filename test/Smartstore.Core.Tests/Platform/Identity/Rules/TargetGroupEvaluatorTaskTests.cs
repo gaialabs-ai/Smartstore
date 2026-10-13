@@ -634,21 +634,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 /// <summary>
 /// Testable subclass of <see cref="TargetGroupEvaluatorTask"/> that replaces
 /// <c>ExecuteDeleteAsync</c> with InMemory-compatible deletion logic.
-///
-/// The EF Core InMemory provider does not support <c>ExecuteDeleteAsync</c>
-/// (a bulk SQL operation). This subclass reimplements <c>Run</c> with the same
-/// control flow, substituting <c>RemoveRange + SaveChangesAsync</c> for the
-/// unsupported bulk delete. All other logic (rule evaluation, batch insertion,
-/// progress reporting, cancellation checks, and cache invalidation) is identical
-/// to the production code.
 /// </summary>
 internal class TestableTargetGroupEvaluatorTask : TargetGroupEvaluatorTask
 {
-    /// <summary>
-    /// Optional callback invoked just after each successful <c>CommitAsync</c> call
-    /// during the insert loop. Used by cancellation tests to cancel at a predictable
-    /// point between chunks.
-    /// </summary>
     public Action OnAfterCommit { get; set; }
 
     public TestableTargetGroupEvaluatorTask(
@@ -660,110 +648,25 @@ internal class TestableTargetGroupEvaluatorTask : TargetGroupEvaluatorTask
     {
     }
 
-    /// <summary>
-    /// Reimplements <see cref="TargetGroupEvaluatorTask.Run"/> with InMemory-compatible
-    /// deletion. The logic mirrors the production code exactly, except that
-    /// <c>ExecuteDeleteAsync</c> is replaced by <c>RemoveRange + SaveChangesAsync</c>.
-    /// </summary>
-    public new async Task Run(TaskExecutionContext ctx, CancellationToken cancelToken = default)
+    protected override async Task<int> DeleteSystemMappingsAsync(
+        IQueryable<CustomerRoleMapping> deleteQuery,
+        DbContextScope scope,
+        CancellationToken cancelToken)
     {
-        var count = 0;
-        var numDeleted = 0;
-        var numAdded = 0;
-        var rolesCount = 0;
-
-        using (var scope = new DbContextScope(_db, autoDetectChanges: false, minHookImportance: HookImportance.Important, deferCommit: true))
+        var entitiesToDelete = await deleteQuery.ToListAsync(cancelToken);
+        _db.CustomerRoleMappings.RemoveRange(entitiesToDelete);
+        var count = entitiesToDelete.Count;
+        if (count > 0)
         {
-            // Delete existing system mappings.
-            // NOTE: Replaces ExecuteDeleteAsync with RemoveRange for InMemory compatibility.
-            var deleteQuery = _db.CustomerRoleMappings.Where(x => x.IsSystemMapping);
-            if (ctx.Parameters.ContainsKey("CustomerRoleIds"))
-            {
-                var roleIds = ctx.Parameters["CustomerRoleIds"].ToIntArray();
-                deleteQuery = deleteQuery.Where(x => roleIds.Contains(x.CustomerRoleId));
-            }
-
-            var entitiesToDelete = await deleteQuery.ToListAsync(cancelToken);
-            _db.CustomerRoleMappings.RemoveRange(entitiesToDelete);
-            numDeleted = entitiesToDelete.Count;
-            if (numDeleted > 0)
-            {
-                await scope.CommitAsync(cancelToken);
-            }
-
-            // Insert new customer role mappings.
-            var roles = await _db.CustomerRoles
-                .Include(x => x.RuleSets)
-                .ThenInclude(x => x.Rules)
-                .AsNoTracking()
-                .AsSplitQuery()
-                .Where(x => x.Active && x.RuleSets.Any(y => y.IsActive))
-                .ToListAsync(cancelToken);
-            rolesCount = roles.Count;
-
-            foreach (var role in roles)
-            {
-                var ruleSetCustomerIds = new HashSet<int>();
-
-                await ctx.SetProgressAsync(++count, roles.Count, $"Add customer assignments for role \"{role.SystemName.NaIfEmpty()}\".");
-
-                // Execute active rule sets and collect customer ids.
-                foreach (var ruleSet in role.RuleSets.Where(x => x.IsActive))
-                {
-                    if (cancelToken.IsCancellationRequested)
-                        return;
-
-                    var expressionGroup = await _ruleService.CreateExpressionGroupAsync(ruleSet, _targetGroupService);
-                    if (expressionGroup is FilterExpression expression)
-                    {
-                        var filterResult = _targetGroupService.ProcessFilter(expression, 0, 500);
-                        var resultPager = new FastPager<Customer>(filterResult.SourceQuery, 500);
-
-                        while ((await resultPager.ReadNextPageAsync(x => x.Id, x => x, cancelToken)).Out(out var customerIds))
-                        {
-                            ruleSetCustomerIds.AddRange(customerIds);
-                        }
-                    }
-                }
-
-                // Add mappings.
-                if (ruleSetCustomerIds.Any())
-                {
-                    foreach (var chunk in ruleSetCustomerIds.Chunk(500))
-                    {
-                        if (cancelToken.IsCancellationRequested)
-                            return;
-
-                        foreach (var customerId in chunk)
-                        {
-                            _db.CustomerRoleMappings.Add(new CustomerRoleMapping
-                            {
-                                CustomerId = customerId,
-                                CustomerRoleId = role.Id,
-                                IsSystemMapping = true
-                            });
-
-                            ++numAdded;
-                        }
-
-                        await scope.CommitAsync(cancelToken);
-                        OnAfterCommit?.Invoke();
-                    }
-
-                    try
-                    {
-                        scope.DbContext.DetachEntities<CustomerRoleMapping>();
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
+            await scope.CommitAsync(cancelToken);
         }
 
-        if (numAdded > 0 || numDeleted > 0)
-        {
-            await _cache.RemoveByPatternAsync(AclService.ACL_SEGMENT_PATTERN);
-        }
+        return count;
+    }
+
+    protected override async Task OnAfterChunkCommittedAsync(CancellationToken cancelToken)
+    {
+        OnAfterCommit?.Invoke();
+        await Task.CompletedTask;
     }
 }
