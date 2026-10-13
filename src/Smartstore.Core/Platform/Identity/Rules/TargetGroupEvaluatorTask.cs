@@ -21,6 +21,18 @@ public partial class TargetGroupEvaluatorTask(
     protected readonly IRuleService _ruleService = ruleService;
     protected readonly ITargetGroupService _targetGroupService = ruleProviderFactory.GetProvider<ITargetGroupService>(RuleScope.Customer);
 
+    /// <summary>
+    /// Evaluates all active rule sets attached to customer roles, deletes existing
+    /// system-generated customer-role mappings, and batch-inserts new mappings for
+    /// matching customers.
+    /// </summary>
+    /// <param name="ctx">The task execution context providing progress reporting and parameters.</param>
+    /// <param name="cancelToken">Token to observe for cancellation at rule evaluation and insertion stages.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    /// <remarks>
+    /// Runs daily at 02:15 by default. Can also be triggered on-demand from the admin UI
+    /// for specific customer roles by passing a <c>CustomerRoleIds</c> parameter.
+    /// </remarks>
     public async Task Run(TaskExecutionContext ctx, CancellationToken cancelToken = default)
     {
         var count = 0;
@@ -116,4 +128,5 @@ public partial class TargetGroupEvaluatorTask(
 
         Debug.WriteLineIf(numDeleted > 0 || numAdded > 0, $"Deleted {numDeleted} and added {numAdded} customer assignments for {rolesCount} roles.");
     }
+
 }
