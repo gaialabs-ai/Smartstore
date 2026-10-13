@@ -3,13 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Autofac;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
 using Smartstore.Caching;
-using Smartstore.Collections;
 using Smartstore.Core.Data;
 using Smartstore.Core.Identity;
 using Smartstore.Core.Identity.Rules;
@@ -17,91 +14,15 @@ using Smartstore.Core.Rules;
 using Smartstore.Core.Rules.Filters;
 using Smartstore.Core.Security;
 using Smartstore.Data;
-using Smartstore.Data.Hooks;
 using Smartstore.Scheduling;
 using Smartstore.Test.Common;
-using Smartstore.Threading;
 
 namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 
 [TestFixture]
-public class TargetGroupEvaluatorTaskTests : ServiceTestBase
+public class TargetGroupEvaluatorTaskTests : TargetGroupEvaluatorTaskTestBase
 {
-    private Mock<ICacheManager> _cacheMock;
-    private Mock<IRuleService> _ruleServiceMock;
-    private Mock<IRuleProviderFactory> _ruleProviderFactoryMock;
-    private Mock<ITargetGroupService> _targetGroupServiceMock;
-    private Mock<ITaskStore> _taskStoreMock;
-    private Mock<IAsyncState> _asyncStateMock;
-    private Mock<IComponentContext> _componentContextMock;
-
-    private TestableTargetGroupEvaluatorTask _sut;
-
-    [SetUp]
-    public new void SetUp()
-    {
-        _cacheMock = new Mock<ICacheManager>();
-        _ruleServiceMock = new Mock<IRuleService>();
-        _ruleProviderFactoryMock = new Mock<IRuleProviderFactory>();
-        _targetGroupServiceMock = new Mock<ITargetGroupService>();
-        _taskStoreMock = new Mock<ITaskStore>();
-        _asyncStateMock = new Mock<IAsyncState>();
-        _componentContextMock = new Mock<IComponentContext>();
-
-        _ruleProviderFactoryMock
-            .Setup(x => x.GetProvider(RuleScope.Customer, null))
-            .Returns(_targetGroupServiceMock.Object);
-
-        _sut = new TestableTargetGroupEvaluatorTask(
-            DbContext,
-            _cacheMock.Object,
-            _ruleServiceMock.Object,
-            _ruleProviderFactoryMock.Object);
-
-        // Clean up any leftover data from previous tests.
-        CleanUpDatabase();
-    }
-
-    [TearDown]
-    public void TestTearDown()
-    {
-        CleanUpDatabase();
-    }
-
     #region Helper Methods
-
-    private void CleanUpDatabase()
-    {
-        var mappings = DbContext.CustomerRoleMappings.ToList();
-        if (mappings.Count > 0)
-        {
-            DbContext.CustomerRoleMappings.RemoveRange(mappings);
-        }
-
-        var roles = DbContext.CustomerRoles.ToList();
-        if (roles.Count > 0)
-        {
-            DbContext.CustomerRoles.RemoveRange(roles);
-        }
-
-        var customers = DbContext.Customers.IgnoreQueryFilters().ToList();
-        if (customers.Count > 0)
-        {
-            DbContext.Customers.RemoveRange(customers);
-        }
-
-        var ruleSets = DbContext.RuleSets.ToList();
-        if (ruleSets.Count > 0)
-        {
-            DbContext.RuleSets.RemoveRange(ruleSets);
-        }
-
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-    }
-
-    private TaskExecutionContext CreateTaskExecutionContext(IDictionary<string, string> parameters = null)
-        => CreateMockableTaskExecutionContext(parameters).Object;
 
     private Customer SeedCustomer(int id)
     {
@@ -117,49 +38,6 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         return customer;
     }
 
-    private CustomerRole SeedCustomerRoleWithRuleSet(int roleId, string systemName, int ruleSetId)
-    {
-        var ruleSet = new RuleSetEntity
-        {
-            Id = ruleSetId,
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-
-        var role = new CustomerRole
-        {
-            Id = roleId,
-            Name = systemName,
-            SystemName = systemName,
-            Active = true
-        };
-
-        // Use EF Core navigation properties to set up the many-to-many relationship.
-        // InMemory provider does not support ExecuteSqlRaw.
-        role.RuleSets.Add(ruleSet);
-
-        DbContext.CustomerRoles.Add(role);
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-
-        return role;
-    }
-
-    private void SeedSystemMapping(int customerId, int customerRoleId, bool isSystemMapping = true)
-    {
-        DbContext.CustomerRoleMappings.Add(new CustomerRoleMapping
-        {
-            CustomerId = customerId,
-            CustomerRoleId = customerRoleId,
-            IsSystemMapping = isSystemMapping
-        });
-
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-    }
-
     private void SetupRuleServiceToReturnFilterExpression(RuleSetEntity ruleSet)
     {
         var filterExpression = new FilterExpressionGroup(typeof(Customer));
@@ -167,23 +45,6 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         _ruleServiceMock
             .Setup(x => x.CreateExpressionGroupAsync(ruleSet, _targetGroupServiceMock.Object, false))
             .ReturnsAsync(filterExpression);
-    }
-
-    private void SetupTargetGroupProcessFilter(IQueryable<Customer> customerQuery)
-    {
-        // Create a mock IPagedList<Customer> that exposes the original EF Core-backed
-        // IQueryable as SourceQuery. This is necessary because FastPager.ReadNextPageAsync
-        // requires the queryable to implement IAsyncEnumerable<T>.
-        var pagedListMock = new Mock<IPagedList<Customer>>();
-        pagedListMock.Setup(x => x.SourceQuery).Returns(customerQuery);
-
-        _targetGroupServiceMock
-            .Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(pagedListMock.Object);
     }
 
     #endregion
@@ -198,8 +59,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(102);
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(201, "Role1", 301);
-        SeedCustomerRoleWithRuleSet(202, "Role2", 302);
+        SeedRoleWithRuleSet(201, "Role1", 301);
+        SeedRoleWithRuleSet(202, "Role2", 302);
 
         SeedSystemMapping(101, 201, isSystemMapping: true);
         SeedSystemMapping(102, 202, isSystemMapping: true);
@@ -207,7 +68,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         // Also seed a non-system mapping that should NOT be deleted.
         SeedSystemMapping(101, 202, isSystemMapping: false);
 
-        var ctx = CreateTaskExecutionContext();
+        var ctx = CreateTaskContext();
 
         // Set up rules to return no matching customers (so no new mappings are created).
         var ruleSet1 = await DbContext.RuleSets.FindAsync(301);
@@ -216,7 +77,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SetupRuleServiceToReturnFilterExpression(ruleSet1);
         SetupRuleServiceToReturnFilterExpression(ruleSet2);
 
-        SetupTargetGroupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
+        SetupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
 
         // Act
         await _sut.Run(ctx);
@@ -248,8 +109,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(112);
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(211, "ScopedRole", 311);
-        SeedCustomerRoleWithRuleSet(212, "UntouchedRole", 312);
+        SeedRoleWithRuleSet(211, "ScopedRole", 311);
+        SeedRoleWithRuleSet(212, "UntouchedRole", 312);
 
         SeedSystemMapping(111, 211, isSystemMapping: true);
         SeedSystemMapping(112, 212, isSystemMapping: true);
@@ -259,7 +120,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         {
             ["CustomerRoleIds"] = "211"
         };
-        var ctx = CreateTaskExecutionContext(parameters);
+        var ctx = CreateTaskContext(parameters);
 
         // Set up rules to return no matching customers.
         var ruleSet1 = await DbContext.RuleSets.FindAsync(311);
@@ -268,7 +129,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SetupRuleServiceToReturnFilterExpression(ruleSet1);
         SetupRuleServiceToReturnFilterExpression(ruleSet2);
 
-        SetupTargetGroupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
+        SetupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
 
         // Act
         await _sut.Run(ctx);
@@ -300,8 +161,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(122);
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(221, "TestRole", 321);
-        var ctx = CreateTaskExecutionContext();
+        SeedRoleWithRuleSet(221, "TestRole", 321);
+        var ctx = CreateTaskContext();
 
         // Set up rules so that ProcessFilter returns a queryable backed by our seeded customers.
         var ruleSet = await DbContext.RuleSets.FindAsync(321);
@@ -309,7 +170,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
         // Return customers from ProcessFilter so they get added as system mappings.
         var customerQuery = DbContext.Customers.Where(c => c.Id == 121 || c.Id == 122);
-        SetupTargetGroupProcessFilter(customerQuery);
+        SetupProcessFilter(customerQuery);
 
         // Act
         await _sut.Run(ctx);
@@ -336,10 +197,10 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(131);
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(231, "ProgressRole1", 331);
-        SeedCustomerRoleWithRuleSet(232, "ProgressRole2", 332);
+        SeedRoleWithRuleSet(231, "ProgressRole1", 331);
+        SeedRoleWithRuleSet(232, "ProgressRole2", 332);
 
-        var ctxMock = CreateMockableTaskExecutionContext();
+        var ctxMock = CreateMockableTaskContext();
 
         var ruleSet1 = await DbContext.RuleSets.FindAsync(331);
         var ruleSet2 = await DbContext.RuleSets.FindAsync(332);
@@ -347,7 +208,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SetupRuleServiceToReturnFilterExpression(ruleSet1);
         SetupRuleServiceToReturnFilterExpression(ruleSet2);
 
-        SetupTargetGroupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
+        SetupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
 
         // Act
         await _sut.Run(ctxMock.Object);
@@ -357,40 +218,6 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         ctxMock.Verify(
             x => x.SetProgressAsync(It.IsAny<int?>(), It.IsAny<string>()),
             Times.Exactly(2));
-    }
-
-    private Mock<TaskExecutionContext> CreateMockableTaskExecutionContext(IDictionary<string, string> parameters = null)
-    {
-        var executionInfo = new TaskExecutionInfo
-        {
-            Id = 1,
-            TaskDescriptorId = 1,
-            IsRunning = true,
-            StartedOnUtc = DateTime.UtcNow,
-            Task = new TaskDescriptor
-            {
-                Id = 1,
-                Name = "TargetGroupEvaluatorTask",
-                Type = typeof(TargetGroupEvaluatorTask).AssemblyQualifiedName,
-                Enabled = true,
-                CronExpression = "0 15 2 * * *"
-            }
-        };
-
-        var ctxMock = new Mock<TaskExecutionContext>(
-            _taskStoreMock.Object,
-            _asyncStateMock.Object,
-            new DefaultHttpContext(),
-            _componentContextMock.Object,
-            executionInfo,
-            parameters ?? new Dictionary<string, string>())
-        { CallBase = true };
-
-        ctxMock
-            .Setup(x => x.SetProgressAsync(It.IsAny<int?>(), It.IsAny<string>()))
-            .Returns(Task.CompletedTask);
-
-        return ctxMock;
     }
 
     #endregion
@@ -455,9 +282,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
                 false))
             .ReturnsAsync(new FilterExpressionGroup(typeof(Customer)));
 
-        SetupTargetGroupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
+        SetupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
 
-        var ctx = CreateTaskExecutionContext();
+        var ctx = CreateTaskContext();
 
         // Act: Pass the CancellationToken that gets cancelled during rule evaluation.
         await _sut.Run(ctx, cts.Token);
@@ -493,14 +320,14 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         }
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(251, "InsertCancelRole", 351);
+        SeedRoleWithRuleSet(251, "InsertCancelRole", 351);
         var ruleSet = await DbContext.RuleSets.FindAsync(351);
 
         SetupRuleServiceToReturnFilterExpression(ruleSet);
 
         var customerQuery = DbContext.Customers
             .Where(c => c.Id >= customerIdStart && c.Id < customerIdStart + customerCount);
-        SetupTargetGroupProcessFilter(customerQuery);
+        SetupProcessFilter(customerQuery);
 
         var cts = new CancellationTokenSource();
 
@@ -508,7 +335,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         // The second chunk will detect cancellation at its top-of-loop check and return early.
         _sut.OnAfterCommit = () => cts.Cancel();
 
-        var ctx = CreateTaskExecutionContext();
+        var ctx = CreateTaskContext();
 
         // Act: The second chunk will detect cancellation and return early.
         await _sut.Run(ctx, cts.Token);
@@ -539,7 +366,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(171);
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(271, "CacheRole", 371);
+        SeedRoleWithRuleSet(271, "CacheRole", 371);
 
         // Seed an existing system mapping to be deleted (numDeleted > 0).
         SeedSystemMapping(171, 271, isSystemMapping: true);
@@ -549,13 +376,13 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
         // Return the customer from ProcessFilter so a new mapping is created (numAdded > 0).
         var customerQuery = DbContext.Customers.Where(c => c.Id == 171);
-        SetupTargetGroupProcessFilter(customerQuery);
+        SetupProcessFilter(customerQuery);
 
         _cacheMock
             .Setup(x => x.RemoveByPatternAsync(It.IsAny<string>()))
             .ReturnsAsync(1);
 
-        var ctx = CreateTaskExecutionContext();
+        var ctx = CreateTaskContext();
 
         // Act
         await _sut.Run(ctx);
@@ -577,15 +404,15 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         SeedCustomer(181);
         DbContext.SaveChanges();
 
-        SeedCustomerRoleWithRuleSet(281, "NoCacheRole", 381);
+        SeedRoleWithRuleSet(281, "NoCacheRole", 381);
 
         var ruleSet = await DbContext.RuleSets.FindAsync(381);
         SetupRuleServiceToReturnFilterExpression(ruleSet);
 
         // Return no customers from ProcessFilter, so no new mappings are created.
-        SetupTargetGroupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
+        SetupProcessFilter(DbContext.Customers.Where(c => c.Id < 0));
 
-        var ctx = CreateTaskExecutionContext();
+        var ctx = CreateTaskContext();
 
         // Act
         await _sut.Run(ctx);
@@ -603,7 +430,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 /// Testable subclass of <see cref="TargetGroupEvaluatorTask"/> that replaces
 /// <c>ExecuteDeleteAsync</c> with InMemory-compatible deletion logic.
 /// </summary>
-internal class TestableTargetGroupEvaluatorTask : TargetGroupEvaluatorTask
+public class TestableTargetGroupEvaluatorTask : TargetGroupEvaluatorTask
 {
     public Action OnAfterCommit { get; set; }
 

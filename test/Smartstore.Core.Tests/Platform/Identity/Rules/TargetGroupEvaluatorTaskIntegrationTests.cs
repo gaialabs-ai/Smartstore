@@ -1,23 +1,15 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Autofac;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Moq;
 using NUnit.Framework;
-using Smartstore.Caching;
-using Smartstore.Collections;
-using Smartstore.Core.Data;
 using Smartstore.Core.Identity;
 using Smartstore.Core.Identity.Rules;
 using Smartstore.Core.Rules;
 using Smartstore.Core.Rules.Filters;
 using Smartstore.Core.Security;
-using Smartstore.Scheduling;
 using Smartstore.Test.Common;
-using Smartstore.Threading;
 
 namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 
@@ -32,33 +24,11 @@ namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 /// with InMemory-compatible deletion logic.
 /// </summary>
 [TestFixture]
-public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
+public class TargetGroupEvaluatorTaskIntegrationTests : TargetGroupEvaluatorTaskTestBase
 {
-    private Mock<ICacheManager> _cacheMock;
-    private Mock<IRuleService> _ruleServiceMock;
-    private Mock<IRuleProviderFactory> _ruleProviderFactoryMock;
-    private Mock<ITargetGroupService> _targetGroupServiceMock;
-    private Mock<ITaskStore> _taskStoreMock;
-    private Mock<IAsyncState> _asyncStateMock;
-    private Mock<IComponentContext> _componentContextMock;
-
-    private TestableTargetGroupEvaluatorTask _sut;
-
     [SetUp]
-    public new void SetUp()
+    public void IntegrationSetUp()
     {
-        _cacheMock = new Mock<ICacheManager>();
-        _ruleServiceMock = new Mock<IRuleService>();
-        _ruleProviderFactoryMock = new Mock<IRuleProviderFactory>();
-        _targetGroupServiceMock = new Mock<ITargetGroupService>();
-        _taskStoreMock = new Mock<ITaskStore>();
-        _asyncStateMock = new Mock<IAsyncState>();
-        _componentContextMock = new Mock<IComponentContext>();
-
-        _ruleProviderFactoryMock
-            .Setup(x => x.GetProvider(RuleScope.Customer, null))
-            .Returns(_targetGroupServiceMock.Object);
-
         // Return a valid FilterExpressionGroup for any rule set.
         _ruleServiceMock
             .Setup(x => x.CreateExpressionGroupAsync(
@@ -66,160 +36,7 @@ public class TargetGroupEvaluatorTaskIntegrationTests : ServiceTestBase
                 It.IsAny<IRuleVisitor>(),
                 It.IsAny<bool>()))
             .ReturnsAsync(new FilterExpressionGroup(typeof(Customer)));
-
-        _sut = new TestableTargetGroupEvaluatorTask(
-            DbContext,
-            _cacheMock.Object,
-            _ruleServiceMock.Object,
-            _ruleProviderFactoryMock.Object);
-
-        CleanUpDatabase();
     }
-
-    [TearDown]
-    public void TestTearDown()
-    {
-        CleanUpDatabase();
-    }
-
-    #region Helpers
-
-    private void CleanUpDatabase()
-    {
-        var mappings = DbContext.CustomerRoleMappings.ToList();
-        if (mappings.Count > 0)
-        {
-            DbContext.CustomerRoleMappings.RemoveRange(mappings);
-        }
-
-        var roles = DbContext.CustomerRoles.ToList();
-        if (roles.Count > 0)
-        {
-            DbContext.CustomerRoles.RemoveRange(roles);
-        }
-
-        var customers = DbContext.Customers.IgnoreQueryFilters().ToList();
-        if (customers.Count > 0)
-        {
-            DbContext.Customers.RemoveRange(customers);
-        }
-
-        var ruleSets = DbContext.RuleSets.ToList();
-        if (ruleSets.Count > 0)
-        {
-            DbContext.RuleSets.RemoveRange(ruleSets);
-        }
-
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-    }
-
-    private TaskExecutionContext CreateTaskContext(IDictionary<string, string> parameters = null)
-    {
-        var executionInfo = new TaskExecutionInfo
-        {
-            Id = 1,
-            TaskDescriptorId = 1,
-            IsRunning = true,
-            StartedOnUtc = DateTime.UtcNow,
-            Task = new TaskDescriptor
-            {
-                Id = 1,
-                Name = "TargetGroupEvaluatorTask",
-                Type = typeof(TargetGroupEvaluatorTask).AssemblyQualifiedName,
-                Enabled = true,
-                CronExpression = "0 15 2 * * *"
-            }
-        };
-
-        var ctxMock = new Mock<TaskExecutionContext>(
-            _taskStoreMock.Object,
-            _asyncStateMock.Object,
-            new DefaultHttpContext(),
-            _componentContextMock.Object,
-            executionInfo,
-            parameters ?? new Dictionary<string, string>())
-        { CallBase = true };
-
-        ctxMock
-            .Setup(x => x.SetProgressAsync(It.IsAny<int?>(), It.IsAny<string>()))
-            .Returns(Task.CompletedTask);
-
-        return ctxMock.Object;
-    }
-
-    private void SeedCustomers(int startId, int count)
-    {
-        for (int i = 0; i < count; i++)
-        {
-            DbContext.Customers.Add(new Customer
-            {
-                Id = startId + i,
-                CustomerGuid = Guid.NewGuid(),
-                CreatedOnUtc = DateTime.UtcNow,
-                LastActivityDateUtc = DateTime.UtcNow
-            });
-        }
-
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-    }
-
-    private CustomerRole SeedRoleWithRuleSet(int roleId, string systemName, int ruleSetId)
-    {
-        var ruleSet = new RuleSetEntity
-        {
-            Id = ruleSetId,
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-
-        var role = new CustomerRole
-        {
-            Id = roleId,
-            Name = systemName,
-            SystemName = systemName,
-            Active = true
-        };
-
-        role.RuleSets.Add(ruleSet);
-        DbContext.CustomerRoles.Add(role);
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-
-        return role;
-    }
-
-    private void SeedSystemMapping(int customerId, int customerRoleId)
-    {
-        DbContext.CustomerRoleMappings.Add(new CustomerRoleMapping
-        {
-            CustomerId = customerId,
-            CustomerRoleId = customerRoleId,
-            IsSystemMapping = true
-        });
-
-        DbContext.SaveChanges();
-        DbContext.ChangeTracker.Clear();
-    }
-
-    private void SetupProcessFilter(IQueryable<Customer> customerQuery)
-    {
-        var pagedListMock = new Mock<IPagedList<Customer>>();
-        pagedListMock.Setup(x => x.SourceQuery).Returns(customerQuery);
-
-        _targetGroupServiceMock
-            .Setup(x => x.ProcessFilter(
-                It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Returns(pagedListMock.Object);
-    }
-
-    #endregion
 
     // ------------------------------------------------------------------
     // 1. Full pipeline creates correct system mappings
