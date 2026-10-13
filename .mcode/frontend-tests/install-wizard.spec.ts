@@ -8,7 +8,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Install Wizard — Page Load and Redirect", () => {
   test("root URL redirects to /install", async ({ page }) => {
     // The root path must redirect (HTTP 302) to the install wizard.
-    const response = await page.goto("/", { waitUntil: "networkidle" });
+    await page.goto("/", { waitUntil: "networkidle" });
     // After following the redirect, the final URL should be /install.
     expect(page.url()).toContain("/install");
   });
@@ -80,10 +80,11 @@ test.describe("Install Wizard — Database Information Section", () => {
     // QA report: combobox "Database system", default "Microsoft SQL Server (Express)"
     const dbDropdown = page.getByRole("combobox", { name: /database system/i });
     await expect(dbDropdown).toBeVisible();
-    // Verify the default selected option text
-    const selectedText = await dbDropdown.inputValue();
-    // inputValue for a select returns the value attribute; check the visible text instead
-    await expect(dbDropdown).toBeVisible();
+    // Verify the selected option text contains "SQL Server"
+    const selectedLabel = await dbDropdown.evaluate(
+      (el: HTMLSelectElement) => el.options[el.selectedIndex]?.textContent ?? ""
+    );
+    expect(selectedLabel).toContain("SQL Server");
   });
 
   test("connection type dropdown is present", async ({ page }) => {
@@ -121,6 +122,11 @@ test.describe("Install Wizard — Options Section", () => {
     // QA report: combobox "Primary language", default "English"
     const langDropdown = page.getByRole("combobox", { name: /primary language/i });
     await expect(langDropdown).toBeVisible();
+    // Verify the selected option text contains "English"
+    const selectedLabel = await langDropdown.evaluate(
+      (el: HTMLSelectElement) => el.options[el.selectedIndex]?.textContent ?? ""
+    );
+    expect(selectedLabel).toContain("English");
   });
 
   test("media storage dropdown is present", async ({ page }) => {
