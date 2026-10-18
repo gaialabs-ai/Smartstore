@@ -29,6 +29,7 @@ app.publish/
 
 # MSTest test Results
 [Tt]est[Rr]esult*/
+test-results/
 [Bb]uild[Ll]og.*
 
 # NUNIT
