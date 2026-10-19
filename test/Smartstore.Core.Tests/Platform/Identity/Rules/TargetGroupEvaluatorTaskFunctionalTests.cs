@@ -267,7 +267,19 @@ public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskT
         AddCustomer("CUST-A");
         AddCustomer("CUST-B");
         AddCustomer("CUST-C"); // matches neither rule set - must never be assigned
+        var staleCustomer = AddCustomer("CUST-STALE"); // leftover match from a previous run
         await _db.SaveChangesAsync();
+
+        // Simulate stale IsSystemMapping=true rows left over from a previous run, for both roles,
+        // whose matched-customer set has since changed (CUST-STALE no longer matches either rule set).
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = staleCustomer.Id, CustomerRoleId = role1.Id, IsSystemMapping = true });
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = staleCustomer.Id, CustomerRoleId = role2.Id, IsSystemMapping = true });
+        await _db.SaveChangesAsync();
+
+        // Real numDeleted: Run()'s delete query removes every pre-existing IsSystemMapping=true row
+        // (unscoped) before recomputing, so this is exactly that count, read from the database rather
+        // than hardcoded.
+        var numDeletedExpected = await _db.CustomerRoleMappings.CountAsync(x => x.IsSystemMapping);
 
         var task = CreateRealTask();
         await task.Run(CreateContext(), CancellationToken.None);
@@ -282,7 +294,7 @@ public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskT
             .ToListAsync();
 
         var numAdded = await _db.CustomerRoleMappings.CountAsync();
-        var snapshot = await SnapshotAsync(numDeleted: 0, numAdded: numAdded);
+        var snapshot = await SnapshotAsync(numDeleted: numDeletedExpected, numAdded: numAdded);
         WriteResult(nameof(Run_Unscoped_RealRuleEngine_RecomputesAllActiveRoles), snapshot);
 
         Assert.That(role1Numbers, Is.EqualTo(new[] { "CUST-A" }));
@@ -314,6 +326,7 @@ public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskT
         AddCustomer("CUST-TARGET");
         AddCustomer("CUST-OTHER-NEW");
         var preExistingCustomer = AddCustomer("CUST-PRE-EXISTING");
+        var staleTargetCustomer = AddCustomer("CUST-STALE-TARGET"); // leftover mapping on the role that WILL be recomputed
         await _db.SaveChangesAsync();
 
         // Simulate a mapping left over from a previous run for the role that is NOT targeted by
@@ -324,7 +337,24 @@ public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskT
             CustomerRoleId = otherRole.Id,
             IsSystemMapping = true
         });
+
+        // A stale mapping on targetRole itself, whose rule-matched customer set has since changed
+        // (CUST-STALE-TARGET no longer matches targetRuleSet's rule). This is the case the previous
+        // version of this test never exercised: deletion of a recomputed role's own stale system
+        // mappings.
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping
+        {
+            CustomerId = staleTargetCustomer.Id,
+            CustomerRoleId = targetRole.Id,
+            IsSystemMapping = true
+        });
         await _db.SaveChangesAsync();
+
+        // Real numDeleted: the task's delete query is scoped to CustomerRoleIds = [targetRole.Id], so
+        // this is exactly the count of pre-existing IsSystemMapping=true rows for targetRole, read
+        // from the database rather than hardcoded.
+        var numDeletedExpected = await _db.CustomerRoleMappings
+            .CountAsync(x => x.IsSystemMapping && x.CustomerRoleId == targetRole.Id);
 
         var task = CreateRealTask();
         var ctx = CreateContext(new Dictionary<string, string> { ["CustomerRoleIds"] = targetRole.Id.ToString() });
@@ -332,7 +362,7 @@ public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskT
         await task.Run(ctx, CancellationToken.None);
 
         var numAdded = await _db.CustomerRoleMappings.CountAsync(x => x.CustomerRoleId == targetRole.Id);
-        var snapshot = await SnapshotAsync(numDeleted: 0, numAdded: numAdded);
+        var snapshot = await SnapshotAsync(numDeleted: numDeletedExpected, numAdded: numAdded);
         WriteResult(nameof(Run_ScopedByCustomerRoleIds_RealRuleEngine_OnlyRecomputesTargetedRole), snapshot);
 
         var targetRoleNumbers = await _db.CustomerRoleMappings
@@ -346,6 +376,7 @@ public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskT
 
         // The targeted role was recomputed as expected, using the real rule engine.
         Assert.That(targetRoleNumbers, Is.EqualTo(new[] { "CUST-TARGET" }));
+        Assert.That(targetRoleNumbers, Does.Not.Contain("CUST-STALE-TARGET"));
 
         // THE REGRESSION ASSERTION: the non-targeted role must be left completely untouched -
         // still exactly the pre-existing mapping, and its own (real, matching) rule set must NEVER

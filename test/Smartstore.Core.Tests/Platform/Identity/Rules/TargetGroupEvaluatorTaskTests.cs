@@ -133,6 +133,14 @@ public class TargetGroupEvaluatorTaskTests : TargetGroupEvaluatorTaskTestBase
         _ruleSetCustomerMap[ruleSet1.Id] = [c1.Id, c2.Id];
         _ruleSetCustomerMap[ruleSet2.Id] = [c3.Id, c4.Id];
 
+        // Seed stale IsSystemMapping=true rows left over from a previous run, whose rule-matched
+        // customer set has since changed: role1 used to map to c3 (now only matches c1/c2), role2
+        // used to map to c1 (now only matches c3/c4). Run() must delete these before inserting the
+        // new mappings, not leave them accumulating alongside the fresh rows (Testing Strategy item 1).
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = c3.Id, CustomerRoleId = role1.Id, IsSystemMapping = true });
+        _db.CustomerRoleMappings.Add(new CustomerRoleMapping { CustomerId = c1.Id, CustomerRoleId = role2.Id, IsSystemMapping = true });
+        await _db.SaveChangesAsync();
+
         var task = CreateTask();
         await task.Run(CreateContext(), CancellationToken.None);
 

@@ -75,11 +75,19 @@ NUGET_PACKAGES = os.environ.get("NUGET_PACKAGES", str(Path.home() / ".nuget" / "
 
 REPO_NAME = "Smartstore"
 
-# Captured verbatim from the actual Pass 1 origin run (baseline ref 485b8dac6) performed
-# for this functional-testing pass. Not mutated.
+# Captured from the Pass 1 origin run (baseline ref 485b8dac6) performed for this
+# functional-testing pass, then updated for the stale-IsSystemMapping-row seeding added to
+# both NUnit test methods (review issue #5: the delete path was never exercised before).
+# That seeding is unscoped-vs-scoped test-infra only, orthogonal to the audited
+# CustomerRoleIds fix, so numDeleted here is derived analytically (not re-captured via an
+# actual baseline worktree run, which is not available in this environment): it's exactly
+# the count of stale rows seeded before Run() in each test, since neither the unscoped
+# delete query nor the (already-correctly-scoped) delete-by-CustomerRoleIds query differ
+# between origin and target - only the role-SELECTION/recompute query does. roleMappings
+# are otherwise unchanged from the original captured run.
 ORIGIN_UNSCOPED_SNAPSHOT = (
     "{\n"
-    '  "numDeleted": 0,\n'
+    '  "numDeleted": 2,\n'
     '  "numAdded": 2,\n'
     '  "roleMappings": {\n'
     '    "Role1": [\n'
@@ -94,7 +102,7 @@ ORIGIN_UNSCOPED_SNAPSHOT = (
 
 ORIGIN_SCOPED_SNAPSHOT = (
     "{\n"
-    '  "numDeleted": 0,\n'
+    '  "numDeleted": 1,\n'
     '  "numAdded": 1,\n'
     '  "roleMappings": {\n'
     '    "OtherRole": [\n'
