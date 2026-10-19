@@ -27,25 +27,35 @@ public partial class TargetGroupEvaluatorTask(
         var numDeleted = 0;
         var numAdded = 0;
         var rolesCount = 0;
+        var roleIds = ctx.Parameters.TryGetValue("CustomerRoleIds", out string value) ? value.ToIntArray() : null;
 
+        // No hook has been found that targets CustomerRoleMapping (directly or generically via BaseEntity)
+        // and is marked [Important]/[Important(HookImportance.Essential)], so suppressing only normal-importance
+        // hooks here behaves the same as legacy's fully-disabled hooks for this entity type.
         using (var scope = new DbContextScope(_db, autoDetectChanges: false, minHookImportance: HookImportance.Important, deferCommit: true))
         {
             // Delete existing system mappings.
             var deleteQuery = _db.CustomerRoleMappings.Where(x => x.IsSystemMapping);
-            if (ctx.Parameters.ContainsKey("CustomerRoleIds"))
+            if (roleIds != null)
             {
-                var roleIds = ctx.Parameters["CustomerRoleIds"].ToIntArray();
                 deleteQuery = deleteQuery.Where(x => roleIds.Contains(x.CustomerRoleId));
             }
 
             numDeleted = await deleteQuery.ExecuteDeleteAsync(cancelToken);
 
             // Insert new customer role mappings.
-            var roles = await _db.CustomerRoles
+            var roleQuery = _db.CustomerRoles
                 .Include(x => x.RuleSets)
                 .ThenInclude(x => x.Rules)
                 .AsNoTracking()
-                .AsSplitQuery()
+                .AsSplitQuery();
+
+            if (roleIds != null)
+            {
+                roleQuery = roleQuery.Where(x => roleIds.Contains(x.Id));
+            }
+
+            var roles = await roleQuery
                 .Where(x => x.Active && x.RuleSets.Any(y => y.IsActive))
                 .ToListAsync(cancelToken);
             rolesCount = roles.Count;
