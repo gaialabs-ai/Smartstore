@@ -61,10 +61,17 @@ TEST_CSPROJ = "test/Smartstore.Core.Tests/Smartstore.Core.Tests.csproj"
 SANDBOX_ROOT = Path(os.environ.get("SANDBOX_ROOT", WORKSPACE_DIR.parent))
 WRITE_RESULTS = SANDBOX_ROOT / ".claude" / "skills" / "sandbox-app-runner" / "write_test_results.py"
 
-PIXI_HELPER = os.environ.get(
-    "PIXI_ACTIVATE_ENV_HELPER",
-    r"C:\Users\nirbenisrael\.local\share\modelcode\workspace\Activate-Env.ps1",
-)
+PIXI_HELPER = os.environ.get("PIXI_ACTIVATE_ENV_HELPER")
+if not PIXI_HELPER:
+    raise RuntimeError(
+        "PIXI_ACTIVATE_ENV_HELPER is not set. This functional test module needs it to "
+        "activate the pixi 'target-app' environment before running `dotnet test`, the "
+        "same convention used by $MCODE_DIR/lifecycle/target/lifecycle_scripts.json "
+        "(`. $env:PIXI_ACTIVATE_ENV_HELPER`). Set it to the path of Activate-Env.ps1 for "
+        "this sandbox before running this test module."
+    )
+
+NUGET_PACKAGES = os.environ.get("NUGET_PACKAGES", str(Path.home() / ".nuget" / "packages"))
 
 REPO_NAME = "Smartstore"
 
@@ -114,7 +121,7 @@ def _run_nunit_method(repo_dir: Path, method_name: str, timeout: int = 180):
         "activate-env target-app\n"
         f"Set-Location '{repo_dir}'\n"
         "$env:DOTNET_ROLL_FORWARD = 'LatestMajor'\n"
-        "$env:NUGET_PACKAGES = 'C:\\Users\\nirbenisrael\\.nuget\\packages'\n"
+        f"$env:NUGET_PACKAGES = '{NUGET_PACKAGES}'\n"
         f"dotnet test {TEST_CSPROJ} -c Release --no-build "
         f'--filter "FullyQualifiedName~{method_name}" --logger "console;verbosity=detailed"\n'
         "exit $LASTEXITCODE\n"
