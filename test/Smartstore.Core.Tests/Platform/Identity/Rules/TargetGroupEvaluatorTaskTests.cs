@@ -43,14 +43,13 @@ namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 /// via <see cref="_ruleSetCustomerMap"/>, configured per test. The mocked <c>ProcessFilter</c> result is
 /// backed by a real EF Core queryable (<c>_db.Customers.Where(...)</c>) so that <see cref="FastPager{T}"/>'s
 /// internal <c>ToListAsync()</c> call (which requires <see cref="IAsyncEnumerable{T}"/>) works correctly.
+///
+/// SQLite/cache test-infra setup/teardown and <c>CreateContext</c>/<c>AddRole</c> helpers are shared with
+/// the sibling <see cref="TargetGroupEvaluatorTaskFunctionalTests"/> class via <see cref="TargetGroupEvaluatorTaskTestBase"/>.
 /// </summary>
 [TestFixture]
-public class TargetGroupEvaluatorTaskTests : ServiceTestBase
+public class TargetGroupEvaluatorTaskTests : TargetGroupEvaluatorTaskTestBase
 {
-    private SqliteConnection _connection;
-    private SmartDbContext _db;
-
-    private Mock<ICacheManager> _cacheMock;
     private Mock<IRuleService> _ruleServiceMock;
     private Mock<ITargetGroupService> _targetGroupServiceMock;
     private Mock<IRuleProviderFactory> _ruleProviderFactoryMock;
@@ -59,34 +58,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     private readonly Dictionary<int, int[]> _ruleSetCustomerMap = new();
 
     [SetUp]
-    public void SetUpSqliteContext()
+    public void SetUpRuleMocks()
     {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        _connection.Open();
-
-        DataSettings.Instance = new DataSettings
-        {
-            AppVersion = SmartstoreVersion.Version,
-            ConnectionString = "DataSource=:memory:",
-            TenantName = "Default",
-            TenantRoot = null,
-            DbFactory = new TestSqliteDbFactory(_connection)
-        };
-        DataSettings.SetTestMode(true);
-
-        var optionsBuilder = new DbContextOptionsBuilder<SmartDbContext>()
-            .UseDbFactory(factoryBuilder =>
-            {
-                factoryBuilder.AddModelAssemblies(new[] { typeof(SmartDbContext).Assembly });
-            });
-
-        _db = new SmartDbContext((DbContextOptions<SmartDbContext>)optionsBuilder.Options);
-        _db.Database.EnsureCreated();
-
         _ruleSetCustomerMap.Clear();
-
-        _cacheMock = new Mock<ICacheManager>();
-        _cacheMock.Setup(x => x.RemoveByPatternAsync(It.IsAny<string>())).ReturnsAsync(0L);
 
         _targetGroupServiceMock = new Mock<ITargetGroupService>();
         _targetGroupServiceMock
@@ -113,56 +87,14 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             .Returns(_targetGroupServiceMock.Object);
     }
 
-    [TearDown]
-    public void TearDownSqliteContext()
-    {
-        // NOTE: DataSettings.Reload() is intentionally NOT called here (per-test); the base class's
-        // [OneTimeTearDown] already does that once after all tests in this fixture have completed.
-        _db?.Dispose();
-        _connection?.Dispose();
-    }
-
     private TargetGroupEvaluatorTask CreateTask()
         => new(_db, _cacheMock.Object, _ruleServiceMock.Object, _ruleProviderFactoryMock.Object);
-
-    private static TaskExecutionContext CreateContext(IDictionary<string, string> parameters = null)
-    {
-        var taskStoreMock = new Mock<ITaskStore>();
-        taskStoreMock.Setup(x => x.UpdateExecutionInfoAsync(It.IsAny<TaskExecutionInfo>())).Returns(Task.CompletedTask);
-
-        var asyncStateMock = new Mock<IAsyncState>();
-        asyncStateMock.Setup(x => x.GetAsync<TaskDescriptor>(It.IsAny<string>())).ReturnsAsync((TaskDescriptor)null);
-
-        var componentContextMock = new Mock<IComponentContext>();
-
-        var executionInfo = new TaskExecutionInfo
-        {
-            Id = 1,
-            TaskDescriptorId = 1,
-            Task = new TaskDescriptor { Id = 1, Name = nameof(TargetGroupEvaluatorTask) }
-        };
-
-        return new TaskExecutionContext(
-            taskStoreMock.Object,
-            asyncStateMock.Object,
-            new DefaultHttpContext(),
-            componentContextMock.Object,
-            executionInfo,
-            parameters);
-    }
 
     private Customer AddCustomer()
     {
         var customer = new Customer { CustomerGuid = Guid.NewGuid() };
         _db.Customers.Add(customer);
         return customer;
-    }
-
-    private CustomerRole AddRole(string name, bool active)
-    {
-        var role = new CustomerRole { Name = name, Active = active, SystemName = name };
-        _db.CustomerRoles.Add(role);
-        return role;
     }
 
     private RuleSetEntity AddRuleSet(bool isActive)

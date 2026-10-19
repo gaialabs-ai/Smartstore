@@ -52,13 +52,13 @@ namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 /// business keys - role SystemName and customer CustomerNumber - not database-generated ids) to a
 /// file, so an external pytest harness can run this exact test class unmodified against both the
 /// pre-fix baseline ref and the current (fixed) ref and diff the real, observed behavior.
+///
+/// SQLite/cache test-infra setup/teardown and <c>CreateContext</c>/<c>AddRole</c> helpers are shared
+/// with the sibling <see cref="TargetGroupEvaluatorTaskTests"/> class via <see cref="TargetGroupEvaluatorTaskTestBase"/>.
 /// </summary>
 [TestFixture]
-public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
+public class TargetGroupEvaluatorTaskFunctionalTests : TargetGroupEvaluatorTaskTestBase
 {
-    private SqliteConnection _connection;
-    private SmartDbContext _db;
-    private Mock<ICacheManager> _cacheMock;
     private IServiceProviderContainer _providerContainer;
     private IServiceProvider _originalApplicationServices;
     private AutofacServiceProvider _augmentedServiceProvider;
@@ -107,42 +107,6 @@ public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
         }
 
         _augmentedServiceProvider?.Dispose();
-    }
-
-    [SetUp]
-    public void SetUpSqliteContext()
-    {
-        _connection = new SqliteConnection("DataSource=:memory:");
-        _connection.Open();
-
-        DataSettings.Instance = new DataSettings
-        {
-            AppVersion = SmartstoreVersion.Version,
-            ConnectionString = "DataSource=:memory:",
-            TenantName = "Default",
-            TenantRoot = null,
-            DbFactory = new TestSqliteDbFactory(_connection)
-        };
-        DataSettings.SetTestMode(true);
-
-        var optionsBuilder = new DbContextOptionsBuilder<SmartDbContext>()
-            .UseDbFactory(factoryBuilder =>
-            {
-                factoryBuilder.AddModelAssemblies(new[] { typeof(SmartDbContext).Assembly });
-            });
-
-        _db = new SmartDbContext((DbContextOptions<SmartDbContext>)optionsBuilder.Options);
-        _db.Database.EnsureCreated();
-
-        _cacheMock = new Mock<ICacheManager>();
-        _cacheMock.Setup(x => x.RemoveByPatternAsync(It.IsAny<string>())).ReturnsAsync(0L);
-    }
-
-    [TearDown]
-    public void TearDownSqliteContext()
-    {
-        _db?.Dispose();
-        _connection?.Dispose();
     }
 
     // ------------------------------------------------------------------
@@ -203,44 +167,11 @@ public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
         return new TargetGroupEvaluatorTask(_db, _cacheMock.Object, ruleService, ruleProviderFactory);
     }
 
-    private static TaskExecutionContext CreateContext(IDictionary<string, string> parameters = null)
-    {
-        var taskStoreMock = new Mock<ITaskStore>();
-        taskStoreMock.Setup(x => x.UpdateExecutionInfoAsync(It.IsAny<TaskExecutionInfo>())).Returns(Task.CompletedTask);
-
-        var asyncStateMock = new Mock<IAsyncState>();
-        asyncStateMock.Setup(x => x.GetAsync<TaskDescriptor>(It.IsAny<string>())).ReturnsAsync((TaskDescriptor)null);
-
-        var componentContextMock = new Mock<IComponentContext>();
-
-        var executionInfo = new TaskExecutionInfo
-        {
-            Id = 1,
-            TaskDescriptorId = 1,
-            Task = new TaskDescriptor { Id = 1, Name = nameof(TargetGroupEvaluatorTask) }
-        };
-
-        return new TaskExecutionContext(
-            taskStoreMock.Object,
-            asyncStateMock.Object,
-            new DefaultHttpContext(),
-            componentContextMock.Object,
-            executionInfo,
-            parameters);
-    }
-
     private Customer AddCustomer(string customerNumber)
     {
         var customer = new Customer { CustomerGuid = Guid.NewGuid(), CustomerNumber = customerNumber };
         _db.Customers.Add(customer);
         return customer;
-    }
-
-    private CustomerRole AddRole(string name, bool active)
-    {
-        var role = new CustomerRole { Name = name, Active = active, SystemName = name };
-        _db.CustomerRoles.Add(role);
-        return role;
     }
 
     /// <summary>
