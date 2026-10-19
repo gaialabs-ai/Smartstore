@@ -380,8 +380,8 @@ public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
         targetRole.RuleSets.Add(targetRuleSet);
         otherRole.RuleSets.Add(otherRuleSet);
 
-        var targetCustomer = AddCustomer("CUST-TARGET");
-        var otherNewCustomer = AddCustomer("CUST-OTHER-NEW");
+        AddCustomer("CUST-TARGET");
+        AddCustomer("CUST-OTHER-NEW");
         var preExistingCustomer = AddCustomer("CUST-PRE-EXISTING");
         await _db.SaveChangesAsync();
 
