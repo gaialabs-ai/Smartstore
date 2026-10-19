@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autofac;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Moq;
 using NUnit.Framework;
 using Smartstore.Caching;
@@ -15,15 +18,20 @@ using Smartstore.Core.Identity;
 using Smartstore.Core.Identity.Rules;
 using Smartstore.Core.Rules;
 using Smartstore.Core.Rules.Filters;
-using Smartstore.Core.Tests;
+using Smartstore.Data;
+using Smartstore.Data.Providers;
 using Smartstore.Scheduling;
 using Smartstore.Threading;
+using Smartstore.Utilities;
 
 namespace Smartstore.Core.Tests.Platform.Identity.Rules;
 
 [TestFixture]
-public class TargetGroupEvaluatorTaskTests : ServiceTestBase
+public class TargetGroupEvaluatorTaskTests
 {
+    private SqliteConnection _connection;
+    private SmartDbContext _db;
+
     private Mock<ICacheManager> _cacheMock;
     private Mock<IRuleService> _ruleServiceMock;
     private Mock<IRuleProviderFactory> _ruleProviderFactoryMock;
@@ -32,17 +40,60 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     private Mock<IAsyncState> _asyncStateMock;
     private TargetGroupEvaluatorTask _task;
 
+    [OneTimeSetUp]
+    public void SetUp()
+    {
+        CommonHelper.IsHosted = false;
+        CommonHelper.IsDevEnvironment = false;
+
+        // Open SQLite in-memory connection (must stay open for lifetime of tests).
+        _connection = new SqliteConnection("DataSource=:memory:");
+        _connection.Open();
+
+        // Create a SqliteTestDbFactory that uses the open connection.
+        var factory = new SqliteTestDbFactory(_connection);
+
+        // Set up DataSettings (required by SmartDbContext.OnModelCreating).
+        DataSettings.Instance = new DataSettings
+        {
+            AppVersion = SmartstoreVersion.Version,
+            ConnectionString = "DataSource=:memory:",
+            TenantName = "Default",
+            TenantRoot = null,
+            DbFactory = factory
+        };
+        DataSettings.SetTestMode(true);
+
+        // Build DbContext options using UseDbFactory (required for DbFactoryOptionsExtension).
+        var builder = new DbContextOptionsBuilder<SmartDbContext>()
+            .UseDbFactory(factory, "DataSource=:memory:", factoryBuilder =>
+            {
+                factoryBuilder.AddModelAssemblies(new[] { typeof(SmartDbContext).Assembly });
+            });
+
+        _db = new SmartDbContext((DbContextOptions<SmartDbContext>)builder.Options);
+        _db.Database.EnsureCreated();
+    }
+
+    [OneTimeTearDown]
+    public void TearDown()
+    {
+        _db?.Dispose();
+        _connection?.Dispose();
+        DataSettings.Reload();
+    }
+
     [SetUp]
     public async Task TestSetUp()
     {
         // Clean up database state from prior tests.
-        var existingMappings = await DbContext.CustomerRoleMappings.ToListAsync();
+        var existingMappings = await _db.CustomerRoleMappings.ToListAsync();
         if (existingMappings.Count > 0)
         {
-            DbContext.CustomerRoleMappings.RemoveRange(existingMappings);
+            _db.CustomerRoleMappings.RemoveRange(existingMappings);
         }
 
-        var existingRoles = await DbContext.CustomerRoles
+        var existingRoles = await _db.CustomerRoles
             .Include(x => x.RuleSets)
             .ToListAsync();
         foreach (var role in existingRoles)
@@ -51,29 +102,29 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         }
         if (existingRoles.Count > 0)
         {
-            DbContext.CustomerRoles.RemoveRange(existingRoles);
+            _db.CustomerRoles.RemoveRange(existingRoles);
         }
 
-        var existingRules = await DbContext.Rules.ToListAsync();
+        var existingRules = await _db.Rules.ToListAsync();
         if (existingRules.Count > 0)
         {
-            DbContext.Rules.RemoveRange(existingRules);
+            _db.Rules.RemoveRange(existingRules);
         }
 
-        var existingRuleSets = await DbContext.RuleSets.ToListAsync();
+        var existingRuleSets = await _db.RuleSets.ToListAsync();
         if (existingRuleSets.Count > 0)
         {
-            DbContext.RuleSets.RemoveRange(existingRuleSets);
+            _db.RuleSets.RemoveRange(existingRuleSets);
         }
 
-        var existingCustomers = await DbContext.Customers.ToListAsync();
+        var existingCustomers = await _db.Customers.ToListAsync();
         if (existingCustomers.Count > 0)
         {
-            DbContext.Customers.RemoveRange(existingCustomers);
+            _db.Customers.RemoveRange(existingCustomers);
         }
 
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         // Initialize mocks.
         _cacheMock = new Mock<ICacheManager>();
@@ -106,7 +157,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
         // Create the task under test.
         _task = new TargetGroupEvaluatorTask(
-            DbContext,
+            _db,
             _cacheMock.Object,
             _ruleServiceMock.Object,
             _ruleProviderFactoryMock.Object);
@@ -115,7 +166,7 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     [TearDown]
     public void TestTearDown()
     {
-        DbContext.ChangeTracker.Clear();
+        _db.ChangeTracker.Clear();
     }
 
     private TaskExecutionContext CreateContext(IDictionary<string, string> parameters = null)
@@ -148,8 +199,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             UpdatedOnUtc = DateTime.UtcNow
         };
 
-        DbContext.RuleSets.Add(ruleSet);
-        await DbContext.SaveChangesAsync();
+        _db.RuleSets.Add(ruleSet);
+        await _db.SaveChangesAsync();
 
         var role = new CustomerRole
         {
@@ -159,9 +210,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         };
         role.RuleSets.Add(ruleSet);
 
-        DbContext.CustomerRoles.Add(role);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        _db.CustomerRoles.Add(role);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         return (role, ruleSet);
     }
@@ -180,9 +231,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             });
         }
 
-        DbContext.Customers.AddRange(customers);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        _db.Customers.AddRange(customers);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         return customers;
     }
@@ -203,12 +254,12 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
         // The extension method ProcessFilter(expression, 0, 500) calls the interface method
         // ProcessFilter(new[] { expression }, LogicalRuleOperator.And, 0, 500).
-        // Build a mock IPagedList<Customer> with SourceQuery backed by the InMemory DbContext
+        // Build a mock IPagedList<Customer> with SourceQuery backed by the SQLite DbContext
         // so that FastPager can call ToListAsync successfully.
         var pagedListMock = new Mock<IPagedList<Customer>>();
         pagedListMock
             .Setup(x => x.SourceQuery)
-            .Returns(DbContext.Customers.Where(c => customerIds.Contains(c.Id)));
+            .Returns(_db.Customers.Where(c => customerIds.Contains(c.Id)));
 
         _targetGroupServiceMock
             .Setup(x => x.ProcessFilter(
@@ -234,8 +285,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             Name = "InactiveRole",
             SystemName = "InactiveRole"
         };
-        DbContext.CustomerRoles.Add(role);
-        await DbContext.SaveChangesAsync();
+        _db.CustomerRoles.Add(role);
+        await _db.SaveChangesAsync();
 
         // Seed CustomerRoleMappings: some system, some non-system.
         var systemMapping1 = new CustomerRoleMapping
@@ -257,9 +308,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             IsSystemMapping = false
         };
 
-        DbContext.CustomerRoleMappings.AddRange(systemMapping1, systemMapping2, nonSystemMapping);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        _db.CustomerRoleMappings.AddRange(systemMapping1, systemMapping2, nonSystemMapping);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         var ctx = CreateContext();
 
@@ -267,8 +318,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         await _task.Run(ctx, CancellationToken.None);
 
         // Assert: System mappings should be deleted, non-system mapping should remain.
-        DbContext.ChangeTracker.Clear();
-        var remainingMappings = await DbContext.CustomerRoleMappings.ToListAsync();
+        _db.ChangeTracker.Clear();
+        var remainingMappings = await _db.CustomerRoleMappings.ToListAsync();
 
         Assert.That(remainingMappings, Has.Count.EqualTo(1));
         Assert.That(remainingMappings[0].IsSystemMapping, Is.False);
@@ -298,8 +349,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             Name = "Role2",
             SystemName = "Role2"
         };
-        DbContext.CustomerRoles.AddRange(role1, role2);
-        await DbContext.SaveChangesAsync();
+        _db.CustomerRoles.AddRange(role1, role2);
+        await _db.SaveChangesAsync();
 
         // System mapping for role1 (should be deleted).
         var mappingRole1 = new CustomerRoleMapping
@@ -323,9 +374,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             IsSystemMapping = false
         };
 
-        DbContext.CustomerRoleMappings.AddRange(mappingRole1, mappingRole2, nonSystemMapping);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        _db.CustomerRoleMappings.AddRange(mappingRole1, mappingRole2, nonSystemMapping);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         // Pass CustomerRoleIds parameter to scope the delete.
         var parameters = new Dictionary<string, string>
@@ -338,8 +389,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         await _task.Run(ctx, CancellationToken.None);
 
         // Assert: Only role1's system mapping should be deleted.
-        DbContext.ChangeTracker.Clear();
-        var remainingMappings = await DbContext.CustomerRoleMappings.ToListAsync();
+        _db.ChangeTracker.Clear();
+        var remainingMappings = await _db.CustomerRoleMappings.ToListAsync();
 
         Assert.That(remainingMappings, Has.Count.EqualTo(2));
         Assert.That(remainingMappings.Any(m => m.IsSystemMapping && m.CustomerRoleId == role1.Id), Is.False,
@@ -387,8 +438,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             Times.Once);
 
         // Assert: System mappings should have been created for each customer.
-        DbContext.ChangeTracker.Clear();
-        var mappings = await DbContext.CustomerRoleMappings
+        _db.ChangeTracker.Clear();
+        var mappings = await _db.CustomerRoleMappings
             .Where(m => m.IsSystemMapping && m.CustomerRoleId == role.Id)
             .ToListAsync();
 
@@ -420,8 +471,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         await _task.Run(ctx, CancellationToken.None);
 
         // Assert: All 600 system mappings should have been inserted.
-        DbContext.ChangeTracker.Clear();
-        var mappings = await DbContext.CustomerRoleMappings
+        _db.ChangeTracker.Clear();
+        var mappings = await _db.CustomerRoleMappings
             .Where(m => m.IsSystemMapping && m.CustomerRoleId == role.Id)
             .ToListAsync();
 
@@ -495,8 +546,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             CreatedOnUtc = DateTime.UtcNow,
             UpdatedOnUtc = DateTime.UtcNow
         };
-        DbContext.RuleSets.AddRange(ruleSet1, ruleSet2);
-        await DbContext.SaveChangesAsync();
+        _db.RuleSets.AddRange(ruleSet1, ruleSet2);
+        await _db.SaveChangesAsync();
 
         var role = new CustomerRole
         {
@@ -506,9 +557,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         };
         role.RuleSets.Add(ruleSet1);
         role.RuleSets.Add(ruleSet2);
-        DbContext.CustomerRoles.Add(role);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        _db.CustomerRoles.Add(role);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         var cts = new CancellationTokenSource();
 
@@ -576,8 +627,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         await _task.Run(ctx, CancellationToken.None);
 
         // Assert: No mappings should have been inserted.
-        DbContext.ChangeTracker.Clear();
-        var mappings = await DbContext.CustomerRoleMappings
+        _db.ChangeTracker.Clear();
+        var mappings = await _db.CustomerRoleMappings
             .Where(m => m.IsSystemMapping && m.CustomerRoleId == role.Id)
             .ToListAsync();
 
@@ -619,8 +670,8 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
             CreatedOnUtc = DateTime.UtcNow,
             UpdatedOnUtc = DateTime.UtcNow
         };
-        DbContext.RuleSets.AddRange(ruleSet1, ruleSet2);
-        await DbContext.SaveChangesAsync();
+        _db.RuleSets.AddRange(ruleSet1, ruleSet2);
+        await _db.SaveChangesAsync();
 
         var role1 = new CustomerRole { Active = true, Name = "ProgressRole1", SystemName = "ProgressRole1" };
         role1.RuleSets.Add(ruleSet1);
@@ -628,9 +679,9 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
         var role2 = new CustomerRole { Active = true, Name = "ProgressRole2", SystemName = "ProgressRole2" };
         role2.RuleSets.Add(ruleSet2);
 
-        DbContext.CustomerRoles.AddRange(role1, role2);
-        await DbContext.SaveChangesAsync();
-        DbContext.ChangeTracker.Clear();
+        _db.CustomerRoles.AddRange(role1, role2);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
 
         // Return null expressions so no mappings get created (simplifies this test).
         _ruleServiceMock
@@ -675,13 +726,13 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
 
         // Assert: After the task runs, DetachEntities<CustomerRoleMapping>() was called
         // inside the task. Verify the ChangeTracker has no tracked CustomerRoleMapping entities.
-        var trackedMappings = DbContext.ChangeTracker.Entries<CustomerRoleMapping>().ToList();
+        var trackedMappings = _db.ChangeTracker.Entries<CustomerRoleMapping>().ToList();
         Assert.That(trackedMappings, Has.Count.EqualTo(0),
             "CustomerRoleMapping entities should have been detached from the ChangeTracker.");
 
         // Also verify the mappings were actually persisted.
-        DbContext.ChangeTracker.Clear();
-        var persistedMappings = await DbContext.CustomerRoleMappings
+        _db.ChangeTracker.Clear();
+        var persistedMappings = await _db.CustomerRoleMappings
             .Where(m => m.IsSystemMapping && m.CustomerRoleId == role.Id)
             .ToListAsync();
 
@@ -689,4 +740,43 @@ public class TargetGroupEvaluatorTaskTests : ServiceTestBase
     }
 
     #endregion
+
+    /// <summary>
+    /// SQLite-backed DbFactory for tests. Uses a shared in-memory connection
+    /// so that <c>ExecuteDeleteAsync</c> (and other relational operations) work,
+    /// unlike the EF Core InMemory provider.
+    /// </summary>
+    private class SqliteTestDbFactory : DbFactory
+    {
+        private readonly SqliteConnection _connection;
+
+        public SqliteTestDbFactory(SqliteConnection connection)
+            => _connection = connection;
+
+        public override DbSystemType DbSystem => DbSystemType.SQLite;
+
+        public override DbConnectionStringBuilder CreateConnectionStringBuilder(string connectionString)
+            => throw new NotImplementedException();
+
+        public override DbConnectionStringBuilder CreateConnectionStringBuilder(
+            string server, string database, string userName, string password)
+            => throw new NotImplementedException();
+
+        public override DataProvider CreateDataProvider(DatabaseFacade database)
+            => throw new NotImplementedException();
+
+        public override TContext CreateDbContext<TContext>(string connectionString, int? commandTimeout = null)
+            => throw new NotImplementedException();
+
+        public override DbContextOptionsBuilder ConfigureDbContext(DbContextOptionsBuilder builder, string connectionString)
+        {
+            return builder.UseSqlite(_connection);
+        }
+
+        public override void ConfigureModelConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            configurationBuilder.Properties<decimal>().HaveConversion<double>();
+            configurationBuilder.Properties<decimal?>().HaveConversion<double?>();
+        }
+    }
 }
