@@ -29,7 +29,17 @@ app.publish/
 
 # MSTest test Results
 [Tt]est[Rr]esult*/
+test-results/
+ft-harness-output/
 [Bb]uild[Ll]og.*
+
+# Python (functional test harness)
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
 
 # NUNIT
 *.VisualState.xml

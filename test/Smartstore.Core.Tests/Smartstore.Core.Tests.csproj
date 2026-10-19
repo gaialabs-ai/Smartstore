@@ -31,6 +31,39 @@
 		<PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
 	</ItemGroup>
 
+	<!--
+		SQLite provider, used only by TargetGroupEvaluatorTaskTests. The InMemory provider above does not
+		support EF Core's ExecuteDelete(Async)/ExecuteUpdate(Async) bulk operations, which TargetGroupEvaluatorTask
+		relies on. Package set/versions mirrored from src/Smartstore.Data/Smartstore.Data.Sqlite/Smartstore.Data.Sqlite.csproj.
+	-->
+	<ItemGroup>
+		<PackageReference Include="SQLitePCLRaw.config.e_sqlite3" Version="3.0.3" GeneratePathProperty="true" />
+		<PackageReference Include="SourceGear.sqlite3" Version="3.50.4.5" GeneratePathProperty="true" />
+		<PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="3.0.3" GeneratePathProperty="true" />
+		<PackageReference Include="SQLitePCLRaw.core" Version="3.0.3" GeneratePathProperty="true" />
+		<PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.8" GeneratePathProperty="true" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite.Core" Version="10.0.8" GeneratePathProperty="true" />
+
+		<None Include="$(PkgSourceGear_sqlite3)\runtimes\**\*" CopyToOutputDirectory="PreserveNewest" LinkBase="runtimes">
+			<Visible>true</Visible>
+		</None>
+		<None Include="$(PkgSQLitePCLRaw_config_e_sqlite3)\lib\net8.0\*.dll" CopyToOutputDirectory="PreserveNewest">
+			<Visible>false</Visible>
+		</None>
+		<None Include="$(PkgSQLitePCLRaw_provider_e_sqlite3)\lib\net8.0\*.dll" CopyToOutputDirectory="PreserveNewest">
+			<Visible>false</Visible>
+		</None>
+		<None Include="$(PkgSQLitePCLRaw_core)\lib\netstandard2.0\*.dll" CopyToOutputDirectory="PreserveNewest">
+			<Visible>false</Visible>
+		</None>
+		<None Include="$(PkgMicrosoft_Data_Sqlite_Core)\lib\net8.0\*.dll" CopyToOutputDirectory="PreserveNewest">
+			<Visible>false</Visible>
+		</None>
+		<None Include="$(PkgMicrosoft_EntityFrameworkCore_Sqlite_Core)\lib\net10.0\*.dll" CopyToOutputDirectory="PreserveNewest">
+			<Visible>false</Visible>
+		</None>
+	</ItemGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\..\src\Smartstore.Core\Smartstore.Core.csproj" />
 		<ProjectReference Include="..\..\src\Smartstore\Smartstore.csproj" />
