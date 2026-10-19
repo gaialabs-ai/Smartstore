@@ -61,6 +61,7 @@ public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
     private Mock<ICacheManager> _cacheMock;
     private IServiceProviderContainer _providerContainer;
     private IServiceProvider _originalApplicationServices;
+    private AutofacServiceProvider _augmentedServiceProvider;
 
     // ------------------------------------------------------------------
     // TargetGroupService.LoadDescriptorsAsync() unconditionally builds a "LastDeviceFamily" filter
@@ -93,7 +94,8 @@ public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
             cb.RegisterInstance(userAgentParserMock.Object).As<IUserAgentParser>().SingleInstance();
         });
 
-        _providerContainer.ApplicationServices = new AutofacServiceProvider(augmentedScope);
+        _augmentedServiceProvider = new AutofacServiceProvider(augmentedScope);
+        _providerContainer.ApplicationServices = _augmentedServiceProvider;
     }
 
     [OneTimeTearDown]
@@ -103,6 +105,8 @@ public class TargetGroupEvaluatorTaskFunctionalTests : ServiceTestBase
         {
             _providerContainer.ApplicationServices = _originalApplicationServices;
         }
+
+        _augmentedServiceProvider?.Dispose();
     }
 
     [SetUp]
