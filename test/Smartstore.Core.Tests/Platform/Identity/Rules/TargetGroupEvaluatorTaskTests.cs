@@ -238,6 +238,40 @@ public class TargetGroupEvaluatorTaskTests
         return customers;
     }
 
+    private async Task<(RuleSetEntity ruleSet1, RuleSetEntity ruleSet2)> SeedTwoRuleSetsAsync(string name1 = "RuleSet1", string name2 = "RuleSet2")
+    {
+        var ruleSet1 = new RuleSetEntity
+        {
+            IsActive = true,
+            Scope = RuleScope.Customer,
+            Name = name1,
+            CreatedOnUtc = DateTime.UtcNow,
+            UpdatedOnUtc = DateTime.UtcNow
+        };
+        var ruleSet2 = new RuleSetEntity
+        {
+            IsActive = true,
+            Scope = RuleScope.Customer,
+            Name = name2,
+            CreatedOnUtc = DateTime.UtcNow,
+            UpdatedOnUtc = DateTime.UtcNow
+        };
+        _db.RuleSets.AddRange(ruleSet1, ruleSet2);
+        await _db.SaveChangesAsync();
+
+        return (ruleSet1, ruleSet2);
+    }
+
+    private void SetupNullExpressionGroup()
+    {
+        _ruleServiceMock
+            .Setup(x => x.CreateExpressionGroupAsync(
+                It.IsAny<RuleSetEntity>(),
+                It.IsAny<IRuleVisitor>(),
+                It.IsAny<bool>()))
+            .ReturnsAsync((IRuleExpressionGroup)null);
+    }
+
     private void SetupRuleServiceAndProcessFilter(List<int> customerIds)
     {
         // FilterExpressionGroup extends FilterExpression and implements IRuleExpressionGroup.
@@ -530,24 +564,7 @@ public class TargetGroupEvaluatorTaskTests
         // in the inner foreach can be exercised on the second iteration.
         var customers = await SeedCustomersAsync(3);
 
-        var ruleSet1 = new RuleSetEntity
-        {
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            Name = "CancelRuleSet1",
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-        var ruleSet2 = new RuleSetEntity
-        {
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            Name = "CancelRuleSet2",
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-        _db.RuleSets.AddRange(ruleSet1, ruleSet2);
-        await _db.SaveChangesAsync();
+        var (ruleSet1, ruleSet2) = await SeedTwoRuleSetsAsync("CancelRuleSet1", "CancelRuleSet2");
 
         var role = new CustomerRole
         {
@@ -613,13 +630,7 @@ public class TargetGroupEvaluatorTaskTests
         var customers = await SeedCustomersAsync(2);
         var (role, ruleSet) = await SeedRoleWithActiveRuleSetAsync("NullExpressionRole");
 
-        // Return null from CreateExpressionGroupAsync (not a FilterExpression).
-        _ruleServiceMock
-            .Setup(x => x.CreateExpressionGroupAsync(
-                It.IsAny<RuleSetEntity>(),
-                It.IsAny<IRuleVisitor>(),
-                It.IsAny<bool>()))
-            .ReturnsAsync((IRuleExpressionGroup)null);
+        SetupNullExpressionGroup();
 
         var ctx = CreateContext();
 
@@ -654,24 +665,7 @@ public class TargetGroupEvaluatorTaskTests
         // Arrange: Seed two roles with active rule sets.
         var customers = await SeedCustomersAsync(2);
 
-        var ruleSet1 = new RuleSetEntity
-        {
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            Name = "RuleSet1",
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-        var ruleSet2 = new RuleSetEntity
-        {
-            IsActive = true,
-            Scope = RuleScope.Customer,
-            Name = "RuleSet2",
-            CreatedOnUtc = DateTime.UtcNow,
-            UpdatedOnUtc = DateTime.UtcNow
-        };
-        _db.RuleSets.AddRange(ruleSet1, ruleSet2);
-        await _db.SaveChangesAsync();
+        var (ruleSet1, ruleSet2) = await SeedTwoRuleSetsAsync();
 
         var role1 = new CustomerRole { Active = true, Name = "ProgressRole1", SystemName = "ProgressRole1" };
         role1.RuleSets.Add(ruleSet1);
@@ -683,13 +677,7 @@ public class TargetGroupEvaluatorTaskTests
         await _db.SaveChangesAsync();
         _db.ChangeTracker.Clear();
 
-        // Return null expressions so no mappings get created (simplifies this test).
-        _ruleServiceMock
-            .Setup(x => x.CreateExpressionGroupAsync(
-                It.IsAny<RuleSetEntity>(),
-                It.IsAny<IRuleVisitor>(),
-                It.IsAny<bool>()))
-            .ReturnsAsync((IRuleExpressionGroup)null);
+        SetupNullExpressionGroup();
 
         var ctx = CreateContext();
 
