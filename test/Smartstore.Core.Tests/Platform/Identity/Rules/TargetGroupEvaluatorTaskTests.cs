@@ -238,7 +238,7 @@ public class TargetGroupEvaluatorTaskTests
         return customers;
     }
 
-    private void SetupRuleServiceAndProcessFilter(List<int> customerIds, RuleSetEntity ruleSet = null)
+    private void SetupRuleServiceAndProcessFilter(List<int> customerIds)
     {
         // FilterExpressionGroup extends FilterExpression and implements IRuleExpressionGroup.
         // The task code checks "if (expressionGroup is FilterExpression expression)" which
