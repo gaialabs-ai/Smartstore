@@ -710,18 +710,29 @@ public class TargetGroupEvaluatorTaskTests
 
         SetupNullExpressionGroup();
 
+        var capturedPercents = new List<int?>();
+        var capturedMessages = new List<string>();
+
+        _taskStoreMock
+            .Setup(x => x.UpdateExecutionInfoAsync(It.IsAny<TaskExecutionInfo>()))
+            .Callback<TaskExecutionInfo>(info =>
+            {
+                capturedPercents.Add(info.ProgressPercent);
+                capturedMessages.Add(info.ProgressMessage);
+            })
+            .Returns(Task.CompletedTask);
+
         var ctx = CreateContext();
 
         // Act
         await _task.Run(ctx, CancellationToken.None);
 
-        // Assert: UpdateExecutionInfoAsync should have been called for each role's
-        // progress update. SetProgressAsync(int value, int maximum, string message)
-        // delegates to SetProgressAsync(int?, string) which calls
-        // TaskStore.UpdateExecutionInfoAsync.
-        _taskStoreMock.Verify(
-            x => x.UpdateExecutionInfoAsync(It.IsAny<TaskExecutionInfo>()),
-            Times.Exactly(2));
+        // Assert: Progress was reported twice with correct percent and message.
+        Assert.That(capturedPercents, Has.Count.EqualTo(2));
+        Assert.That(capturedPercents[0], Is.EqualTo(50));
+        Assert.That(capturedPercents[1], Is.EqualTo(100));
+        Assert.That(capturedMessages[0], Does.Contain("ProgressRole1"));
+        Assert.That(capturedMessages[1], Does.Contain("ProgressRole2"));
     }
 
     #endregion
