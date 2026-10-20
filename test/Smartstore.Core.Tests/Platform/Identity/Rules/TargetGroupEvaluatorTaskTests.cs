@@ -655,35 +655,44 @@ public class TargetGroupEvaluatorTaskTests
     #region Test 7: Empty rule set results
 
     [Test]
-    public async Task Can_handle_null_expression_group_without_inserting()
+    public async Task Can_handle_zero_customer_results_and_continue_to_next_role()
     {
-        // Arrange: Seed a role with active rule set.
-        var customers = await SeedCustomersAsync(2);
-        var (role, ruleSet) = await SeedRoleWithActiveRuleSetAsync("NullExpressionRole");
+        // Arrange: Seed two roles with active rule sets.
+        // ProcessFilter returns zero matching customers (empty list).
+        var (role1, _) = await SeedRoleWithActiveRuleSetAsync("EmptyRole1");
+        var (role2, _) = await SeedRoleWithActiveRuleSetAsync("EmptyRole2");
 
-        SetupNullExpressionGroup();
+        SetupRuleServiceAndProcessFilter(new List<int>());
 
         var ctx = CreateContext();
 
         // Act
         await _task.Run(ctx, CancellationToken.None);
 
-        // Assert: No mappings should have been inserted.
+        // Assert: No mappings should have been inserted for either role.
         _db.ChangeTracker.Clear();
         var mappings = await _db.CustomerRoleMappings
-            .Where(m => m.IsSystemMapping && m.CustomerRoleId == role.Id)
+            .Where(m => m.IsSystemMapping)
             .ToListAsync();
 
         Assert.That(mappings, Has.Count.EqualTo(0));
 
-        // Assert: ProcessFilter should NOT have been called.
+        // Assert: ProcessFilter was called for both roles (processing continued).
         _targetGroupServiceMock.Verify(
             x => x.ProcessFilter(
                 It.IsAny<FilterExpression[]>(),
-                It.IsAny<LogicalRuleOperator>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()),
-            Times.Never);
+                LogicalRuleOperator.And,
+                0,
+                500),
+            Times.Exactly(2));
+
+        // Assert: CreateExpressionGroupAsync was called for both roles.
+        _ruleServiceMock.Verify(
+            x => x.CreateExpressionGroupAsync(
+                It.IsAny<RuleSetEntity>(),
+                It.IsAny<IRuleVisitor>(),
+                It.IsAny<bool>()),
+            Times.Exactly(2));
     }
 
     #endregion
