@@ -539,6 +539,37 @@ public class TargetGroupEvaluatorTaskTests
     }
 
     [Test]
+    public async Task Can_invalidate_cache_when_mappings_are_deleted()
+    {
+        // Arrange: Seed system mappings but no active roles (so nothing is added).
+        var customers = await SeedCustomersAsync(2);
+        var role = new CustomerRole
+        {
+            Active = false,
+            Name = "InactiveCacheRole",
+            SystemName = "InactiveCacheRole"
+        };
+        _db.CustomerRoles.Add(role);
+        await _db.SaveChangesAsync();
+
+        _db.CustomerRoleMappings.AddRange(
+            new CustomerRoleMapping { CustomerId = customers[0].Id, CustomerRoleId = role.Id, IsSystemMapping = true },
+            new CustomerRoleMapping { CustomerId = customers[1].Id, CustomerRoleId = role.Id, IsSystemMapping = true });
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        var ctx = CreateContext();
+
+        // Act
+        await _task.Run(ctx, CancellationToken.None);
+
+        // Assert: Cache should be cleared because mappings were deleted (numDeleted > 0).
+        _cacheMock.Verify(
+            x => x.RemoveByPatternAsync("acl:range-*"),
+            Times.Once);
+    }
+
+    [Test]
     public async Task Can_skip_cache_invalidation_when_no_changes()
     {
         // Arrange: No roles at all, so nothing gets deleted or added.
