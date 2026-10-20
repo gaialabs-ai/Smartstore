@@ -112,64 +112,33 @@ def health_check():
 class TestApplyRulesHappyPath:
     """POST /admin/customerrole/ApplyRules/{id} -- valid role IDs."""
 
-    def test_apply_rules_administrators_role(self, admin_session):
-        """Apply rules for the Administrators role (ID=1).
+    @pytest.mark.parametrize("role_id,expected_text", [
+        (1, "Administrators"),
+        (3, None),
+        (4, None),
+    ])
+    def test_apply_rules_valid_role(self, admin_session, role_id, expected_text):
+        """Apply rules for a valid customer role.
 
         The task should execute successfully. The endpoint schedules the
-        TargetGroupEvaluatorTask via RunSingleTaskAsync with CustomerRoleIds=[1]
-        and returns the role edit page (200). Since no active rule sets are
-        configured for this role, the task will:
-        1. Delete any existing system mappings for role ID 1
-        2. Find no active roles with active rule sets to process
-        3. Return a success response with the role edit page
+        TargetGroupEvaluatorTask via RunSingleTaskAsync with CustomerRoleIds=[id]
+        and returns the role edit page (200).
         """
         rvt = get_rvt_token(
             admin_session, f"{BASE_URL}/admin/customerrole/list"
         )
         resp = post_with_antiforgery(
             admin_session,
-            f"{BASE_URL}/admin/customerrole/ApplyRules/1",
+            f"{BASE_URL}/admin/customerrole/ApplyRules/{role_id}",
             rvt,
         )
         assert resp.status_code == 200, (
-            f"ApplyRules(1) returned {resp.status_code}: {resp.text[:500]}"
+            f"ApplyRules({role_id}) returned {resp.status_code}: {resp.text[:500]}"
         )
-        # The endpoint returns the customer role edit page after scheduling the task
-        assert "Administrators" in resp.text, (
-            "Response should contain the Administrators role edit page"
-        )
-
-    def test_apply_rules_registered_role(self, admin_session):
-        """Apply rules for the Registered role (ID=3).
-
-        Similar to the Administrators test -- the task runs but since this role
-        has no active rule sets, it does a scoped delete and returns.
-        """
-        rvt = get_rvt_token(
-            admin_session, f"{BASE_URL}/admin/customerrole/list"
-        )
-        resp = post_with_antiforgery(
-            admin_session,
-            f"{BASE_URL}/admin/customerrole/ApplyRules/3",
-            rvt,
-        )
-        assert resp.status_code == 200, (
-            f"ApplyRules(3) returned {resp.status_code}: {resp.text[:500]}"
-        )
-
-    def test_apply_rules_guests_role(self, admin_session):
-        """Apply rules for the Guests role (ID=4)."""
-        rvt = get_rvt_token(
-            admin_session, f"{BASE_URL}/admin/customerrole/list"
-        )
-        resp = post_with_antiforgery(
-            admin_session,
-            f"{BASE_URL}/admin/customerrole/ApplyRules/4",
-            rvt,
-        )
-        assert resp.status_code == 200, (
-            f"ApplyRules(4) returned {resp.status_code}: {resp.text[:500]}"
-        )
+        if expected_text is not None:
+            assert expected_text in resp.text, (
+                f"Response should contain '{expected_text}'"
+            )
 
 
 class TestApplyRulesNotFound:
@@ -220,30 +189,17 @@ class TestApplyRulesAuth:
 class TestApplyRulesInvalidInput:
     """POST /admin/customerrole/ApplyRules -- boundary / invalid cases."""
 
-    def test_apply_rules_zero_id(self, admin_session):
-        """Apply rules with ID=0 (invalid) should return 404."""
+    @pytest.mark.parametrize("role_id", [0, -1])
+    def test_apply_rules_invalid_id(self, admin_session, role_id):
+        """Apply rules with invalid ID should return 404."""
         rvt = get_rvt_token(
             admin_session, f"{BASE_URL}/admin/customerrole/list"
         )
         resp = post_with_antiforgery(
             admin_session,
-            f"{BASE_URL}/admin/customerrole/ApplyRules/0",
+            f"{BASE_URL}/admin/customerrole/ApplyRules/{role_id}",
             rvt,
         )
         assert resp.status_code == 404, (
-            f"ApplyRules(0) returned {resp.status_code}: {resp.text[:500]}"
-        )
-
-    def test_apply_rules_negative_id(self, admin_session):
-        """Apply rules with negative ID should return 404."""
-        rvt = get_rvt_token(
-            admin_session, f"{BASE_URL}/admin/customerrole/list"
-        )
-        resp = post_with_antiforgery(
-            admin_session,
-            f"{BASE_URL}/admin/customerrole/ApplyRules/-1",
-            rvt,
-        )
-        assert resp.status_code == 404, (
-            f"ApplyRules(-1) returned {resp.status_code}: {resp.text[:500]}"
+            f"ApplyRules({role_id}) returned {resp.status_code}: {resp.text[:500]}"
         )
