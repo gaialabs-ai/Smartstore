@@ -650,6 +650,47 @@ public class TargetGroupEvaluatorTaskTests
             Times.Never);
     }
 
+    [Test]
+    public async Task Can_handle_cancellation_during_insert_stage_and_return_early()
+    {
+        // Arrange: Seed 600 customers (two chunks: 500 + 100) and one role.
+        var customers = await SeedCustomersAsync(600);
+        var (role, ruleSet) = await SeedRoleWithActiveRuleSetAsync("InsertCancelRole");
+
+        var customerIds = customers.Select(c => c.Id).ToList();
+        SetupRuleServiceAndProcessFilter(customerIds);
+
+        var cts = new CancellationTokenSource();
+
+        // Cancel the token after the first SaveChanges (chunk 1 committed).
+        // The second chunk's cancellation check will then trigger a return.
+        EventHandler<SavedChangesEventArgs> handler = null;
+        handler = (sender, args) =>
+        {
+            cts.Cancel();
+            _db.SavedChanges -= handler;
+        };
+        _db.SavedChanges += handler;
+
+        var ctx = CreateContext();
+
+        // Act
+        await _task.Run(ctx, cts.Token);
+
+        // Assert: Only chunk 1 (500 mappings) was committed; chunk 2 was skipped.
+        _db.ChangeTracker.Clear();
+        var mappings = await _db.CustomerRoleMappings
+            .Where(m => m.IsSystemMapping && m.CustomerRoleId == role.Id)
+            .ToListAsync();
+
+        Assert.That(mappings, Has.Count.EqualTo(500));
+
+        // Assert: Cache was NOT invalidated (return exits before the cache block).
+        _cacheMock.Verify(
+            x => x.RemoveByPatternAsync(It.IsAny<string>()),
+            Times.Never);
+    }
+
     #endregion
 
     #region Test 7: Empty rule set results
