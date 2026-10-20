@@ -14,7 +14,6 @@ These tests verify that:
 """
 
 import re
-import time
 import urllib.parse
 
 import pytest
