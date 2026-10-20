@@ -22,6 +22,7 @@ using Smartstore.Data;
 using Smartstore.Data.Providers;
 using Smartstore.Scheduling;
 using Smartstore.Threading;
+using Smartstore.Engine;
 using Smartstore.Utilities;
 
 namespace Smartstore.Core.Tests.Platform.Identity.Rules;
@@ -45,6 +46,15 @@ public class TargetGroupEvaluatorTaskTests
     {
         CommonHelper.IsHosted = false;
         CommonHelper.IsDevEnvironment = false;
+
+        // Initialize EngineContext with a minimal setup so UseDbFactory can resolve
+        // DbFactoryOptionsExtension without a full host.
+        var container = new ContainerBuilder().Build();
+        var appContextMock = new Mock<IApplicationContext>();
+        appContextMock.Setup(x => x.Services).Returns(container);
+        var engineMock = new Mock<IEngine>();
+        engineMock.Setup(x => x.Application).Returns(appContextMock.Object);
+        EngineContext.Replace(engineMock.Object);
 
         // Open SQLite in-memory connection (must stay open for lifetime of tests).
         _connection = new SqliteConnection("DataSource=:memory:");
@@ -81,6 +91,7 @@ public class TargetGroupEvaluatorTaskTests
         _db?.Dispose();
         _connection?.Dispose();
         DataSettings.Reload();
+        EngineContext.Replace(null);
     }
 
     [SetUp]
